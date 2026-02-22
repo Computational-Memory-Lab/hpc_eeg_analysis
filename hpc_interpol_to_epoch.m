@@ -1,10 +1,11 @@
-function hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
+function hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 % HPC_INTERPOL_TO_EPOCH - Epoch EEG data and apply artifact rejection
 %
 % Usage:
 %   hpc_interpol_to_epoch(input_folder)
 %   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold)
 %   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
+%   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 %
 % Inputs:
 %   input_folder           - Path to folder containing .set files
@@ -17,6 +18,8 @@ function hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs
 %                            Accepts:
 %                              1) Nx2 cell, e.g. {'SME', {'11'}; 'Test', {'21','22'}}
 %                              2) spec string, e.g. 'SME:11;Test:21,22'
+%   subject_filter         - Optional numeric subject ID. When provided,
+%                            process only that subject.
 %
 % Notes:
 %   - Epoching uses trigger codes (EEG.event.type), not event_label.
@@ -33,6 +36,11 @@ if nargin < 4 || isempty(epoch_triggers)
 end
 if nargin < 5 || isempty(group_spec)
     group_spec = 'SME:11;Test_Intact:21;Test_Recombined:22';
+end
+if nargin < 6
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
 end
 
 epoch_triggers = normalize_trigger_list(epoch_triggers);
@@ -78,18 +86,29 @@ for i = 1:length(filtered_files)
     [~, basename, ~] = fileparts(fname);
     tokens = regexp(basename, '(\d+)', 'tokens');
     if ~isempty(tokens)
+        sid = str2double(tokens{1}{1});
+        if ~isempty(subject_filter) && sid ~= subject_filter
+            continue;
+        end
         file_info(end+1).filename = fname; %#ok<AGROW>
         file_info(end).filepath = filtered_files(i).folder;
-        file_info(end).subject_id = str2double(tokens{1}{1});
+        file_info(end).subject_id = sid;
     else
         fprintf('WARNING: Could not extract subject ID from "%s", skipping\n', fname);
     end
 end
 if isempty(file_info)
-    error('No .set files with parseable subject IDs found in: %s', input_folder);
+    if ~isempty(subject_filter)
+        error('Subject %d not found in interpol folder: %s', subject_filter, input_folder);
+    else
+        error('No .set files with parseable subject IDs found in: %s', input_folder);
+    end
 end
 
 fprintf('Files to process: %d\n', length(file_info));
+if ~isempty(subject_filter)
+    fprintf('Subject filter: %d\n', subject_filter);
+end
 
 % Create output directory
 epoch_folder = fullfile(input_folder, 'epoch');
@@ -216,6 +235,23 @@ end
 fprintf('Output folder: %s\n', epoch_folder);
 fprintf('==============================================\n\n');
 
+end
+
+function out = parse_optional_subject_filter(value)
+if isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0
+    out = double(value);
+    return;
+end
+
+if (ischar(value) && ~isempty(strtrim(value))) || (isstring(value) && isscalar(value))
+    n = str2double(strtrim(char(value)));
+    if isfinite(n) && mod(n, 1) == 0
+        out = double(n);
+        return;
+    end
+end
+
+error('subject_filter must be a finite integer subject ID.');
 end
 
 function triggers = normalize_trigger_list(value)

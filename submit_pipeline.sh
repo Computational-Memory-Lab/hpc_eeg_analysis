@@ -1,6 +1,7 @@
 #!/bin/bash
 # submit_pipeline.sh
 # Submits the full EEG analysis pipeline as chained SLURM jobs.
+# Stages 1-3 are submitted as subject-level SLURM arrays.
 # Edit RAW_INPUT, PLOTS, epoch logic, condition order, and contrasts below.
 
 set -euo pipefail
@@ -11,6 +12,14 @@ set -euo pipefail
 RAW_INPUT="/home/devon7y/scratch/devon7y/mydata"
 PLOTS="/home/devon7y/scratch/devon7y/plots"
 SCRIPTS="/home/devon7y/scratch/devon7y/hpc_eeg_analysis"
+
+# ============================================================
+# ARRAY SETTINGS (Stages 1-3)
+# Tune throttles based on cluster availability and storage load.
+# ============================================================
+ARRAY_THROTTLE_STAGE1="24"
+ARRAY_THROTTLE_STAGE2="8"
+ARRAY_THROTTLE_STAGE3="24"
 
 # ============================================================
 # EPOCH + DESIGN SETTINGS
@@ -38,32 +47,99 @@ BEHAVIORAL_SET="${INITIAL_SET}/behavioral_set"
 INTERPOL="${BEHAVIORAL_SET}/interpol"
 EPOCH="${INTERPOL}/epoch"
 FIRST_LEVEL="${EPOCH}/limo_first_level"
+MANIFEST_DIR="${PARENT_DIR}/pipeline_manifests"
+mkdir -p "${MANIFEST_DIR}"
+
+if [[ ! -d "${RAW_INPUT}" ]]; then
+  echo "ERROR: RAW_INPUT folder does not exist: ${RAW_INPUT}" >&2
+  exit 1
+fi
+
+for REQUIRED_SCRIPT in \
+  "hpc_raw_to_set.slurm" \
+  "hpc_set_to_interpol.slurm" \
+  "hpc_interpol_to_epoch.slurm" \
+  "hpc_limo_first_level.slurm" \
+  "hpc_limo_second_level.slurm" \
+  "hpc_limo_channel_time_plots.slurm"; do
+  if [[ ! -f "${SCRIPTS}/${REQUIRED_SCRIPT}" ]]; then
+    echo "ERROR: Missing SLURM script: ${SCRIPTS}/${REQUIRED_SCRIPT}" >&2
+    exit 1
+  fi
+done
 
 # ============================================================
-# STAGE 1: raw -> set + behavioral alignment
+# BUILD SUBJECT MANIFEST FROM RAW_INPUT/*.raw
+# ============================================================
+SUBJECTS_FILE="${MANIFEST_DIR}/subjects_$(date +%Y%m%d_%H%M%S).txt"
+TMP_SUBJECTS="${SUBJECTS_FILE}.tmp"
+
+shopt -s nullglob
+RAW_FILES=( "${RAW_INPUT}"/*.raw )
+shopt -u nullglob
+
+if [[ ${#RAW_FILES[@]} -eq 0 ]]; then
+  echo "ERROR: No .raw files found in RAW_INPUT: ${RAW_INPUT}" >&2
+  exit 1
+fi
+
+: > "${TMP_SUBJECTS}"
+for RAW_FILE in "${RAW_FILES[@]}"; do
+  RAW_BASE="$(basename "${RAW_FILE}" .raw)"
+  SID="$(echo "${RAW_BASE}" | grep -oE '[0-9]+' | head -n 1 || true)"
+  if [[ -n "${SID}" ]]; then
+    echo "${SID}" >> "${TMP_SUBJECTS}"
+  else
+    echo "WARNING: Could not extract subject ID from raw file, skipping: ${RAW_FILE}" >&2
+  fi
+done
+
+if [[ ! -s "${TMP_SUBJECTS}" ]]; then
+  echo "ERROR: No parseable subject IDs were found in ${RAW_INPUT}" >&2
+  rm -f "${TMP_SUBJECTS}"
+  exit 1
+fi
+
+sort -n -u "${TMP_SUBJECTS}" > "${SUBJECTS_FILE}"
+rm -f "${TMP_SUBJECTS}"
+
+NUM_SUBJECTS="$(wc -l < "${SUBJECTS_FILE}" | tr -d '[:space:]')"
+if [[ "${NUM_SUBJECTS}" -lt 1 ]]; then
+  echo "ERROR: Subject manifest is empty: ${SUBJECTS_FILE}" >&2
+  exit 1
+fi
+
+echo "Subject manifest created: ${SUBJECTS_FILE}"
+echo "Subjects detected:        ${NUM_SUBJECTS}"
+
+# ============================================================
+# STAGE 1: raw -> set + behavioral alignment (array)
 # ============================================================
 JOB1=$(sbatch --parsable \
-  --export=ALL,INPUT_FOLDER="${RAW_INPUT}" \
+  --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE1} \
+  --export=ALL,INPUT_FOLDER="${RAW_INPUT}",SUBJECTS_FILE="${SUBJECTS_FILE}" \
   "${SCRIPTS}/hpc_raw_to_set.slurm")
-echo "Submitted job1 (raw_to_set):                  ${JOB1}"
+echo "Submitted job1 array (raw_to_set):            ${JOB1}"
 
 # ============================================================
-# STAGE 2: behavioral set -> interpol
+# STAGE 2: behavioral set -> interpol (array)
 # ============================================================
 JOB2=$(sbatch --parsable \
   --dependency=afterok:${JOB1} \
-  --export=ALL,INPUT_FOLDER="${BEHAVIORAL_SET}" \
+  --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE2} \
+  --export=ALL,INPUT_FOLDER="${BEHAVIORAL_SET}",SUBJECTS_FILE="${SUBJECTS_FILE}" \
   "${SCRIPTS}/hpc_set_to_interpol.slurm")
-echo "Submitted job2 (set_to_interpol):             ${JOB2}"
+echo "Submitted job2 array (set_to_interpol):       ${JOB2}"
 
 # ============================================================
-# STAGE 3: interpol -> epoch
+# STAGE 3: interpol -> epoch (array)
 # ============================================================
 JOB3=$(sbatch --parsable \
   --dependency=afterok:${JOB2} \
-  --export=ALL,INPUT_FOLDER="${INTERPOL}",VOLTAGE_DIFF="${VOLTAGE_DIFF}",VOLTAGE_ABS="${VOLTAGE_ABS}",EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV}",EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC}" \
+  --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE3} \
+  --export=ALL,INPUT_FOLDER="${INTERPOL}",SUBJECTS_FILE="${SUBJECTS_FILE}",VOLTAGE_DIFF="${VOLTAGE_DIFF}",VOLTAGE_ABS="${VOLTAGE_ABS}",EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV}",EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC}" \
   "${SCRIPTS}/hpc_interpol_to_epoch.slurm")
-echo "Submitted job3 (interpol_to_epoch):           ${JOB3}"
+echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
 
 # ============================================================
 # STAGE 4: epoch -> limo first level
@@ -108,6 +184,11 @@ done
 
 echo ""
 echo "All jobs submitted. Monitor with: squeue -u \$USER"
+echo "Subject manifest: ${SUBJECTS_FILE}"
+echo "Array throttles:"
+echo "  stage1: ${ARRAY_THROTTLE_STAGE1}"
+echo "  stage2: ${ARRAY_THROTTLE_STAGE2}"
+echo "  stage3: ${ARRAY_THROTTLE_STAGE3}"
 echo "Derived folders:"
 echo "  initial_set:    ${INITIAL_SET}"
 echo "  behavioral_set: ${BEHAVIORAL_SET}"

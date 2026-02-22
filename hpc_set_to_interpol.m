@@ -1,11 +1,14 @@
-function hpc_set_to_interpol(input_folder)
+function hpc_set_to_interpol(input_folder, subject_filter)
 % HPC_SET_TO_INTERPOL - Apply filtering and channel rejection to EEG data
 %
 % Usage:
 %   hpc_set_to_interpol(input_folder)
+%   hpc_set_to_interpol(input_folder, subject_filter)
 %
 % Inputs:
 %   input_folder - Path to folder containing behaviorally aligned .set files to process
+%   subject_filter - Optional numeric subject ID. When provided, process
+%                    only that subject.
 %
 % Outputs:
 %   - <input_folder>/interpol/preprocessed_full_<ID>.set  Filtered and cleaned EEG datasets
@@ -26,6 +29,16 @@ function hpc_set_to_interpol(input_folder)
 %
 % NOTE: EEGLAB should be loaded by the SLURM script before calling this function
 %   (via: eeglab nogui; in the matlab -r command)
+
+if nargin < 1 || nargin > 2
+    error('Usage: hpc_set_to_interpol(input_folder [, subject_filter])');
+end
+
+if nargin < 2
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
 
 %% CHECK DEPENDENCIES
 if ~exist('pop_loadset', 'file')
@@ -97,6 +110,10 @@ fprintf('Files to process: %d\n', length(files_to_process));
 fprintf('==============================================\n\n');
 
 %% PROCESS EACH FILE
+processed_count = 0;
+skipped_existing_count = 0;
+filtered_out_count = 0;
+matched_subject_count = 0;
 for file_idx = 1:length(files_to_process)
     processed_file = files_to_process{file_idx};
     [~, filename, ext] = fileparts(processed_file);
@@ -107,6 +124,20 @@ for file_idx = 1:length(files_to_process)
         subject_id = str2double(tokens{1});
     else
         error('Could not extract subject ID from filename "%s"', filename);
+    end
+
+    if ~isempty(subject_filter) && subject_id ~= subject_filter
+        filtered_out_count = filtered_out_count + 1;
+        continue;
+    end
+    matched_subject_count = matched_subject_count + 1;
+
+    output_filename = sprintf('preprocessed_full_%d.set', subject_id);
+    output_filepath = fullfile(interpol_folder, output_filename);
+    if exist(output_filepath, 'file')
+        fprintf('\nSkipping subject %d (already exists): %s\n', subject_id, output_filepath);
+        skipped_existing_count = skipped_existing_count + 1;
+        continue;
     end
 
     fprintf('\n==============================================\n');
@@ -350,7 +381,6 @@ for file_idx = 1:length(files_to_process)
 
     %% SAVE DATASET
     fprintf('STEP 14: Saving preprocessed dataset...\n');
-    output_filename = sprintf('preprocessed_full_%d.set', subject_id);
     EEG.setname = sprintf('preprocessed_full_%d', subject_id);
     EEG = pop_saveset(EEG, 'filename', output_filename, 'filepath', interpol_folder);
     fprintf('  Saved: %s\n\n', output_filename);
@@ -408,13 +438,39 @@ for file_idx = 1:length(files_to_process)
         warning('Could not write summary file: %s', summary_txt_file);
     end
 
+    processed_count = processed_count + 1;
+end
+
+if ~isempty(subject_filter) && matched_subject_count == 0
+    error('Subject %d not found in input folder: %s', subject_filter, input_folder);
 end
 
 fprintf('\n==============================================\n');
 fprintf('  ALL FILES PROCESSED!\n');
 fprintf('==============================================\n');
-fprintf('Total files processed: %d\n', length(files_to_process));
+fprintf('Processed subjects: %d\n', processed_count);
+fprintf('Skipped existing:   %d\n', skipped_existing_count);
+if ~isempty(subject_filter)
+    fprintf('Filtered out:       %d\n', filtered_out_count);
+end
 fprintf('Output folder: %s\n', interpol_folder);
 fprintf('==============================================\n\n');
 
+end
+
+function out = parse_optional_subject_filter(value)
+if isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0
+    out = double(value);
+    return;
+end
+
+if (ischar(value) && ~isempty(strtrim(value))) || (isstring(value) && isscalar(value))
+    n = str2double(strtrim(char(value)));
+    if isfinite(n) && mod(n, 1) == 0
+        out = double(n);
+        return;
+    end
+end
+
+error('subject_filter must be a finite integer subject ID.');
 end

@@ -1,12 +1,15 @@
-function hpc_raw_to_set(input_folder)
+function hpc_raw_to_set(input_folder, subject_filter)
 % HPC_RAW_TO_SET - Convert EGI .raw files to .set and import behavioral events
 %
 % Usage:
 %   hpc_raw_to_set(input_folder)
+%   hpc_raw_to_set(input_folder, subject_filter)
 %
 % Inputs:
 %   input_folder - Folder containing subject .raw files plus required
 %                  session .log files and EEG .eeglog files.
+%   subject_filter - Optional numeric subject ID. When provided, process
+%                    only that subject.
 %
 % Expected session log format:
 %   - Contains a tab-delimited header row with the required columns.
@@ -21,12 +24,18 @@ function hpc_raw_to_set(input_folder)
 %   - initial_set/behavioral_set/EEGevents_<ID>.txt
 %   - initial_set/behavioral_set/alignment_parameters_S<ID>.mat
 
-if nargin ~= 1 || ~(ischar(input_folder) || (isstring(input_folder) && isscalar(input_folder)))
-    error('Usage: hpc_raw_to_set(input_folder)');
+if nargin < 1 || nargin > 2 || ~(ischar(input_folder) || (isstring(input_folder) && isscalar(input_folder)))
+    error('Usage: hpc_raw_to_set(input_folder [, subject_filter])');
 end
 
 if isstring(input_folder)
     input_folder = char(input_folder);
+end
+
+if nargin < 2
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
 end
 
 if ~exist(input_folder, 'dir')
@@ -74,6 +83,7 @@ fprintf('==============================================\n\n');
 
 success_count = 0;
 failure_messages = {};
+matched_subject_count = 0;
 
 for i = 1:numel(raw_files)
     raw_name = raw_files(i).name;
@@ -91,6 +101,11 @@ for i = 1:numel(raw_files)
     end
 
     subject_id = str2double(token{1});
+
+    if ~isempty(subject_filter) && subject_id ~= subject_filter
+        continue;
+    end
+    matched_subject_count = matched_subject_count + 1;
 
     fprintf('----------------------------------------------\n');
     fprintf('Subject %d (%d/%d)\n', subject_id, i, numel(raw_files));
@@ -129,6 +144,10 @@ for i = 1:numel(raw_files)
         failure_messages{end+1} = msg; %#ok<AGROW>
         fprintf('\n');
     end
+end
+
+if ~isempty(subject_filter) && matched_subject_count == 0
+    error('Subject %d not found in raw files under: %s', subject_filter, input_folder);
 end
 
 fprintf('==============================================\n');
@@ -678,4 +697,21 @@ label = strtrim(raw);
 label = strrep(label, sprintf('\t'), ' ');
 label = strrep(label, sprintf('\n'), ' ');
 label = strrep(label, sprintf('\r'), ' ');
+end
+
+function out = parse_optional_subject_filter(value)
+if isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0
+    out = double(value);
+    return;
+end
+
+if (ischar(value) && ~isempty(strtrim(value))) || (isstring(value) && isscalar(value))
+    n = str2double(strtrim(char(value)));
+    if isfinite(n) && mod(n, 1) == 0
+        out = double(n);
+        return;
+    end
+end
+
+error('subject_filter must be a finite integer subject ID.');
 end

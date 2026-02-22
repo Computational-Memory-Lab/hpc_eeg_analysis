@@ -11,8 +11,38 @@
 # ============================================================
 # INPUT: folder containing behavioral .set files to preprocess
 # Output will be written to: INPUT_FOLDER/interpol/
+# Optional subject scoping (for SLURM arrays):
+#   SUBJECT_ID=<numeric_id>
+#   SUBJECTS_FILE=<path_with_one_subject_id_per_line> + --array
 # ============================================================
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set}"
+SUBJECT_ID="${SUBJECT_ID:-}"
+SUBJECTS_FILE="${SUBJECTS_FILE:-}"
+
+if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+  if [[ -z "${SUBJECTS_FILE}" ]]; then
+    echo "ERROR: SUBJECTS_FILE is required when using --array for hpc_set_to_interpol.slurm" >&2
+    exit 1
+  fi
+  if [[ ! -f "${SUBJECTS_FILE}" ]]; then
+    echo "ERROR: SUBJECTS_FILE not found: ${SUBJECTS_FILE}" >&2
+    exit 1
+  fi
+  SUBJECT_ID="$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${SUBJECTS_FILE}" | tr -d '[:space:]')"
+fi
+
+if [[ -n "${SUBJECT_ID}" ]] && [[ ! "${SUBJECT_ID}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: SUBJECT_ID must be numeric, got: ${SUBJECT_ID}" >&2
+  exit 1
+fi
+
+if [[ -n "${SUBJECT_ID}" ]]; then
+  MATLAB_CALL="hpc_set_to_interpol('${INPUT_FOLDER}', ${SUBJECT_ID});"
+  echo "Running Stage 2 for subject ${SUBJECT_ID}"
+else
+  MATLAB_CALL="hpc_set_to_interpol('${INPUT_FOLDER}');"
+  echo "Running Stage 2 for all subjects in ${INPUT_FOLDER}"
+fi
 
 module load matlab/2023b
 module load StdEnv/2023
@@ -22,5 +52,5 @@ restoredefaultpath; \
 addpath('/home/devon7y/scratch/devon7y/eeglab2025.0.0'); \
 eeglab nogui; \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_set_to_interpol('${INPUT_FOLDER}'); \
+${MATLAB_CALL} \
 exit;"

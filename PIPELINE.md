@@ -6,6 +6,7 @@ This pipeline now supports general experiments by using:
 - a precomputed `event_label` column in session logs
 - configurable epoch trigger logic
 - condition-name driven second-level contrasts
+- subject-scoped execution for Stages 1-3 (for SLURM arrays)
 
 ---
 
@@ -73,10 +74,12 @@ Notes:
 
 ```matlab
 hpc_raw_to_set(input_folder)
+hpc_raw_to_set(input_folder, subject_filter)
 ```
 
 Input:
 - folder with `.raw`, session `.log`, `.eeglog`
+- optional `subject_filter` (numeric ID) to process one subject only
 - `.log` and `.eeglog` filenames should include the subject ID as a standalone numeric token
   - examples that match subject `12`: `session_12.log`, `12.eeglog`, `sub-12_session.log`
   - avoids ambiguous matches like subject `12` accidentally matching subject `112`
@@ -92,10 +95,12 @@ Outputs (under parent of `input_folder`):
 
 ```matlab
 hpc_set_to_interpol(input_folder)
+hpc_set_to_interpol(input_folder, subject_filter)
 ```
 
 Input:
 - `initial_set/behavioral_set/`
+- optional `subject_filter` (numeric ID) to process one subject only
 
 Output:
 - `initial_set/behavioral_set/interpol/`
@@ -106,6 +111,7 @@ Output:
 hpc_interpol_to_epoch(input_folder)
 hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold)
 hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
+hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 ```
 
 Parameters:
@@ -115,6 +121,7 @@ Parameters:
   - string form: `'SME:11;Test_Intact:21;Test_Recombined:22'`
   - cell form: `{'SME', {'11'}; 'Test', {'21','22'}}`
   - practical rule: group triggers should be a subset of `epoch_triggers`
+- `subject_filter`: optional numeric ID to process one subject only
 
 Behavior:
 - epochs on `epoch_triggers` (`EEG.event.type`)
@@ -179,10 +186,16 @@ Each SLURM script accepts environment-variable overrides via `sbatch --export`.
 
 - `hpc_raw_to_set.slurm`
   - `INPUT_FOLDER`
+  - optional subject scope: `SUBJECT_ID`
+  - array mode: `SUBJECTS_FILE` (one subject ID per line) + `--array`
 - `hpc_set_to_interpol.slurm`
   - `INPUT_FOLDER`
+  - optional subject scope: `SUBJECT_ID`
+  - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_interpol_to_epoch.slurm`
   - `INPUT_FOLDER`, `VOLTAGE_DIFF`, `VOLTAGE_ABS`, `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`
+  - optional subject scope: `SUBJECT_ID`
+  - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
 - `hpc_limo_second_level.slurm`
@@ -205,6 +218,11 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 - configurable epoching (`EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
 - optional explicit `CONDITION_ORDER`
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)
+- subject-manifest generation from `RAW_INPUT/*.raw`
+- Stage 1-3 submission as SLURM arrays (`--array`) with throttles:
+  - `ARRAY_THROTTLE_STAGE1`
+  - `ARRAY_THROTTLE_STAGE2`
+  - `ARRAY_THROTTLE_STAGE3`
 
 Monitor jobs:
 
