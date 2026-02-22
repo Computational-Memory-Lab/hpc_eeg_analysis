@@ -12,7 +12,7 @@
 # INPUT: folder containing behavioral .set files to preprocess
 # Output will be written to: INPUT_FOLDER/interpol/
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set}"
 
 module load matlab/2023b
 module load StdEnv/2023

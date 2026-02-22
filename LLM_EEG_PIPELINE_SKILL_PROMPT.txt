@@ -1,0 +1,164 @@
+You are setting up an EEG-processing Skill for an LLM coding agent that already has an HPC Skill and already knows how to access the cluster.
+
+Context:
+- Project root: /home/devon7y/scratch/devon7y/hpc_eeg_analysis
+- Pipeline documentation source of truth: PIPELINE.md
+- Session log migration requirements: SESSION_LOG_MIGRATION.md
+- Existing scripts:
+  - hpc_raw_to_set.m / .slurm
+  - hpc_set_to_interpol.m / .slurm
+  - hpc_interpol_to_epoch.m / .slurm
+  - hpc_limo_first_level.m / .slurm
+  - hpc_limo_second_level.m / .slurm
+  - hpc_limo_channel_time_plots.m / .slurm
+  - submit_pipeline.sh
+
+Goal:
+Create an EEG pipeline Skill that lets the LLM run any portion of the pipeline from the appropriate starting step, based on the user’s requested input folder and analysis goal.
+
+Important assumptions:
+- The agent already has its HPC Skill (for SSH/rsync/sbatch/squeue/etc.).
+- Do NOT duplicate HPC connection details; reuse the HPC Skill for all cluster operations.
+- Focus this new Skill on EEG pipeline logic, required inputs, stage detection, and job orchestration.
+
+============================================================
+TASKS YOU MUST COMPLETE
+============================================================
+
+1) Create a new EEG pipeline Skill
+- Create a skill folder and SKILL.md (name it clearly, e.g., eeg-hpc-pipeline).
+- The Skill must reference PIPELINE.md as canonical behavior.
+- The Skill must include:
+  - required user inputs
+  - stage detection logic from folder contents
+  - defaults + override rules
+  - command templates for each stage
+  - how to run partial pipelines (start mid-pipeline)
+  - how to run and graph second-level contrasts by condition labels
+  - preflight validation and error handling
+
+2) Update AGENTS.md
+- Add instruction that this EEG Skill must be used whenever user asks for EEG processing/LIMO work.
+- Keep existing HPC Skill guidance.
+- Clarify that HPC Skill handles cluster operations, EEG Skill handles workflow logic.
+
+3) Update CLAUDE.md (create if missing)
+- Add the same role separation and trigger rules as AGENTS.md.
+- Keep it concise but explicit.
+
+4) Ensure the new Skill is user-input driven
+- The Skill must instruct the agent to ask for missing required inputs before running.
+- The Skill must support starting from any stage and executing only remaining required stages.
+
+============================================================
+REQUIRED EEG SKILL BEHAVIOR
+============================================================
+
+A) Ask for required inputs (when missing)
+The Skill should make the agent ask targeted questions, including:
+- Input folder path
+- Desired endpoint/result (e.g., preprocessing only, through epoch, first-level LIMO, second-level + plots)
+- If second-level: condition labels to compare (e.g., Study_hits vs Study_misses)
+- If plots requested: output plot directory
+- Whether to use defaults or custom values for:
+  - VOLTAGE_DIFF (default 20)
+  - VOLTAGE_ABS (default 1000)
+  - EPOCH_TRIGGERS_CSV (default 11,21,22)
+  - EPOCH_GROUP_SPEC (default SME:11;Test_Intact:21;Test_Recombined:22)
+  - CONDITION_ORDER (default empty/infer)
+
+B) Determine start stage automatically from folder contents
+Use robust detection rules like:
+- Stage 1 input (raw): folder contains .raw and matching .log + .eeglog
+- Stage 2 input (behavioral set): folder contains processed_*.set (typically in initial_set/behavioral_set)
+- Stage 3 input (interpol): folder contains preprocessed_full_*.set (typically in interpol/)
+- Stage 4 input (epoch): folder contains *_epoch.set (typically in epoch/)
+- Stage 5 input (limo first level): folder contains PairAsso_Epoched.study and derivatives/
+- Stage 6 input (limo second level): folder contains LIMO.mat and paired_samples_ttest_parameter_*.mat
+
+C) Determine end stage from user intent
+Map typical requests:
+- “up to preprocessing” -> end at Stage 2
+- “epoch this dataset” -> end at Stage 3
+- “run first-level LIMO” -> end at Stage 4
+- “run second-level LIMO on A vs B” -> end at Stage 5
+- “run and graph second-level A vs B” -> end at Stage 6
+
+D) Execute only required stages (from detected start to requested end)
+Stages:
+1. raw_to_set: hpc_raw_to_set(.slurm)
+2. set_to_interpol: hpc_set_to_interpol(.slurm)
+3. interpol_to_epoch: hpc_interpol_to_epoch(.slurm)
+4. limo_first_level: hpc_limo_first_level(.slurm)
+5. limo_second_level: hpc_limo_second_level(.slurm)
+6. channel_time_plots: hpc_limo_channel_time_plots(.slurm)
+
+E) Support label-based second-level contrasts
+- Prefer label mode in hpc_limo_second_level (C1_LABEL/C2_LABEL), not raw numeric indices.
+- Let user specify labels like Study_hits and Study_misses.
+- Generate/ask for CONTRAST_KEY if needed.
+
+F) Validate session log schema before Stage 1
+- Check for required columns in session logs: timestamp, trigger_code, event_label.
+- If invalid, explain what is missing and reference SESSION_LOG_MIGRATION.md.
+
+G) Preflight + confirmation
+Before submitting jobs, the agent should summarize:
+- detected start stage
+- target end stage
+- stages to run
+- key parameters (epoch triggers/group spec, condition order, contrast labels, output dirs)
+Then ask for confirmation if anything is ambiguous.
+
+H) Post-submit monitoring guidance
+- Report submitted job IDs and dependency chain.
+- Offer squeue/sacct monitoring commands.
+- Identify expected output folders at each stage.
+
+============================================================
+REQUIRED COMMAND/ENV COVERAGE IN SKILL
+============================================================
+
+Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
+- hpc_raw_to_set.slurm
+  - INPUT_FOLDER
+- hpc_set_to_interpol.slurm
+  - INPUT_FOLDER
+- hpc_interpol_to_epoch.slurm
+  - INPUT_FOLDER, VOLTAGE_DIFF, VOLTAGE_ABS, EPOCH_TRIGGERS_CSV, EPOCH_GROUP_SPEC
+- hpc_limo_first_level.slurm
+  - INPUT_FOLDER, CONDITION_ORDER
+- hpc_limo_second_level.slurm
+  - label mode: C1_LABEL, C2_LABEL, CONTRAST_KEY
+  - numeric fallback: P1, P2, CONTRAST_KEY
+- hpc_limo_channel_time_plots.slurm
+  - INPUT_FOLDER, OUTPUT_DIR
+
+Also include use of submit_pipeline.sh where appropriate, but emphasize that the Skill must support partial pipelines and not force full runs.
+
+============================================================
+OUTPUT FORMAT YOU MUST PRODUCE
+============================================================
+
+When implementing this request, provide:
+1) New Skill files (with paths)
+2) Updated AGENTS.md changes (with paths)
+3) Updated CLAUDE.md changes (with paths)
+4) A short “how to use” section with sample user prompts, including:
+- Starting from raw files and running through preprocessing
+- Starting from interpol files and running through second-level + plots
+- Running only second-level + plots on an existing first-level folder
+
+============================================================
+QUALITY BAR
+============================================================
+
+- The Skill must be executable guidance, not vague prose.
+- It must make the agent ask for missing inputs.
+- It must explicitly handle mid-pipeline starts.
+- It must use PIPELINE.md semantics and names exactly.
+- It must be robust to common user requests like:
+  - “Run LIMO on this interpol folder.”
+  - “Do second-level Study_hits vs Study_misses and graph it.”
+  - “I have raw files; run up to preprocessing.”
+

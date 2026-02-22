@@ -9,11 +9,11 @@
 #SBATCH --mem=256G
 
 # ============================================================
-# INPUT_FOLDER: a limo_second_level_<p1>_<p2>/ folder
+# INPUT_FOLDER: a limo_second_level_<contrast_key>/ folder
 # OUTPUT_DIR:   folder where .png files will be saved
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch/limo_first_level/limo_second_level_3_4"
-OUTPUT_DIR="/home/devon7y/scratch/devon7y/plots"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch/limo_first_level/limo_second_level_test_hits_vs_test_misses}"
+OUTPUT_DIR="${OUTPUT_DIR:-/home/devon7y/scratch/devon7y/plots}"
 
 module load matlab/2023b
 

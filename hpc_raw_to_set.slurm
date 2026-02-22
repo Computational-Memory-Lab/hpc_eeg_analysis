@@ -14,7 +14,7 @@
 #   <parent_of_INPUT_FOLDER>/initial_set/
 #   <parent_of_INPUT_FOLDER>/initial_set/behavioral_set/
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/mydata"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/mydata}"
 
 module load matlab/2023b
 module load StdEnv/2023

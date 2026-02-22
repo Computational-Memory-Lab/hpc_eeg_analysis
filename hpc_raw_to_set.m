@@ -8,17 +8,18 @@ function hpc_raw_to_set(input_folder)
 %   input_folder - Folder containing subject .raw files plus required
 %                  session .log files and EEG .eeglog files.
 %
+% Expected session log format:
+%   - Contains a tab-delimited header row with the required columns.
+%   - Required columns: timestamp, trigger_code, event_label
+%   - Optional columns: block, trial, word1_id/w1id, word2_id/w2id, target, response,
+%     accuracy/acc, rt/rt_ms, include_in_analysis
+%
 % Outputs (created under the parent directory of input_folder):
-%   - initial_set/<ID>.set                        Initial EEGLAB dataset converted from .raw
+%   - initial_set/<ID>.set
 %   - initial_set/behavioral_set/processed_<ID>.set
-%                                                 EEG dataset with imported behavioral events
 %   - initial_set/behavioral_set/behavioral_<ID>.log
 %   - initial_set/behavioral_set/EEGevents_<ID>.txt
 %   - initial_set/behavioral_set/alignment_parameters_S<ID>.mat
-%
-% Notes:
-%   - Subject IDs are parsed from raw filenames (e.g., 1007.raw -> 1007).
-%   - This function is non-interactive (no file picker usage).
 
 if nargin ~= 1 || ~(ischar(input_folder) || (isstring(input_folder) && isscalar(input_folder)))
     error('Usage: hpc_raw_to_set(input_folder)');
@@ -65,10 +66,10 @@ end
 fprintf('\n==============================================\n');
 fprintf('  HPC RAW -> SET PIPELINE\n');
 fprintf('==============================================\n');
-fprintf('Input folder:        %s\n', input_folder);
-fprintf('Initial set folder:  %s\n', initial_set_folder);
+fprintf('Input folder:         %s\n', input_folder);
+fprintf('Initial set folder:   %s\n', initial_set_folder);
 fprintf('Behavioral set folder:%s\n', behavioral_set_folder);
-fprintf('Raw files found:     %d\n', numel(raw_files));
+fprintf('Raw files found:      %d\n', numel(raw_files));
 fprintf('==============================================\n\n');
 
 success_count = 0;
@@ -151,32 +152,49 @@ fprintf('==============================================\n\n');
 end
 
 function session_file = find_subject_session_log(input_folder, subject_id)
-pattern = fullfile(input_folder, sprintf('*%d*.log', subject_id));
-candidates = dir(pattern);
-
-if ~isempty(candidates)
-    is_eeglog = endsWith({candidates.name}, '.eeglog');
-    candidates = candidates(~is_eeglog);
+all_logs = dir(fullfile(input_folder, '*.log'));
+if ~isempty(all_logs)
+    is_eeglog = endsWith({all_logs.name}, '.eeglog');
+    all_logs = all_logs(~is_eeglog);
 end
 
-if isempty(candidates)
-    all_logs = dir(fullfile(input_folder, '*.log'));
-    is_eeglog = endsWith({all_logs.name}, '.eeglog');
-    candidates = all_logs(~is_eeglog);
+candidates = filter_files_by_subject_id(all_logs, subject_id);
+
+if isempty(candidates) && numel(all_logs) == 1
+    % Backward-compatible fallback for single-subject folders.
+    candidates = all_logs;
 end
 
 session_file = require_single_match(candidates, input_folder, subject_id, 'session .log');
 end
 
 function eeglog_file = find_subject_eeglog(input_folder, subject_id)
-pattern = fullfile(input_folder, sprintf('*%d*.eeglog', subject_id));
-candidates = dir(pattern);
+candidates_all = dir(fullfile(input_folder, '*.eeglog'));
+candidates = filter_files_by_subject_id(candidates_all, subject_id);
 
-if isempty(candidates)
-    candidates = dir(fullfile(input_folder, '*.eeglog'));
+if isempty(candidates) && numel(candidates_all) == 1
+    % Backward-compatible fallback for single-subject folders.
+    candidates = candidates_all;
 end
 
 eeglog_file = require_single_match(candidates, input_folder, subject_id, '.eeglog');
+end
+
+function filtered = filter_files_by_subject_id(files, subject_id)
+filtered = files([]);
+if isempty(files)
+    return;
+end
+
+sid = num2str(subject_id);
+sid_pattern = ['(^|[^0-9])' regexptranslate('escape', sid) '([^0-9]|$)'];
+
+for i = 1:numel(files)
+    [~, stem, ~] = fileparts(files(i).name);
+    if ~isempty(regexp(stem, sid_pattern, 'once'))
+        filtered(end + 1) = files(i); %#ok<AGROW>
+    end
+end
 end
 
 function matched_file = require_single_match(candidates, input_folder, subject_id, file_type)
@@ -197,8 +215,6 @@ end
 end
 
 function process_subject_behavioral_alignment(subject_id, session_file, eeg_file, eeglog_file, output_folder)
-% Process one subject: parse behavior, align timing, import events, and save .set
-
 if ~exist(session_file, 'file')
     error('Session file not found: %s', session_file);
 end
@@ -221,161 +237,34 @@ fprintf('Session file: %s\n', session_file);
 fprintf('EEG set:      %s\n', eeg_file);
 fprintf('EEGlog file:  %s\n\n', eeglog_file);
 
-%% Part 1: Process Behavioral Data
-fprintf('STEP 1: Processing behavioral data...\n');
+%% Part 1: Read behavioral events directly from session log
+fprintf('STEP 1: Loading behavioral events from session log...\n');
+events = read_session_events(session_file);
+fprintf('  Events retained for import: %d\n', numel(events));
 
-fid = fopen(session_file);
-if fid == -1
-    error('Could not open session file: %s', session_file);
+% Event label summary
+labels = {events.event_label};
+unique_labels = unique(labels);
+for i = 1:numel(unique_labels)
+    c = sum(strcmp(labels, unique_labels{i}));
+    fprintf('    %-30s %d\n', unique_labels{i}, c);
 end
-fgetl(fid);
-fgetl(fid);
-
-lines = {};
-while ~feof(fid)
-    line = fgetl(fid);
-    if ischar(line)
-        lines{end+1} = line; %#ok<AGROW>
-    end
-end
-fclose(fid);
-
-study_trials = [];
-assoc_trials = [];
-item_trials = [];
-
-num_study = 0;
-num_assoc_intact = 0;
-num_assoc_recomb = 0;
-num_item_old = 0;
-num_item_new = 0;
-num_pilot_excluded = 0;
-
-for i = 1:length(lines)
-    parts = strsplit(lines{i}, '\t');
-    if length(parts) < 3
-        continue;
-    end
-
-    if strcmp(parts{3}, 'B') || strcmp(parts{3}, 'E')
-        continue;
-    elseif strcmp(parts{3}, 'LIST')
-        continue;
-    elseif startsWith(parts{3}, 'P')
-        num_pilot_excluded = num_pilot_excluded + 1;
-        continue;
-    elseif length(parts) >= 13 && strcmp(parts{5}, 'ASSOC')
-        timestamp = str2double(parts{1});
-        block = str2double(parts{3});
-        trial = str2double(parts{4});
-        word1_id = str2double(parts{7});
-        word2_id = str2double(parts{9});
-        target = str2double(parts{10});
-        response = str2double(parts{11});
-        accuracy = str2double(parts{12});
-        rt = str2double(parts{13});
-
-        if target == 1
-            type_code = 21;
-            num_assoc_intact = num_assoc_intact + 1;
-        else
-            type_code = 22;
-            num_assoc_recomb = num_assoc_recomb + 1;
-        end
-
-        assoc_trials(end+1,:) = [timestamp block trial word1_id word2_id target response accuracy rt type_code]; %#ok<AGROW>
-
-    elseif length(parts) >= 11 && strcmp(parts{5}, 'ITEM')
-        timestamp = str2double(parts{1});
-        block = str2double(parts{3});
-        trial = str2double(parts{4});
-        word_id = str2double(parts{7});
-        target = str2double(parts{8});
-        response = str2double(parts{9});
-        accuracy = str2double(parts{10});
-        rt = str2double(parts{11});
-
-        if target == 1
-            type_code = 31;
-            num_item_old = num_item_old + 1;
-        else
-            type_code = 32;
-            num_item_new = num_item_new + 1;
-        end
-
-        item_trials(end+1,:) = [timestamp block trial word_id -1 target response accuracy rt type_code]; %#ok<AGROW>
-
-    elseif length(parts) >= 9
-        timestamp = str2double(parts{1});
-        block = str2double(parts{3});
-        trial = str2double(parts{4});
-        word1_id = str2double(parts{6});
-        word2_id = str2double(parts{8});
-        ipi = str2double(parts{9});
-
-        study_trials(end+1,:) = [timestamp block trial word1_id word2_id -1 -1 -1 ipi -2]; %#ok<AGROW>
-        num_study = num_study + 1;
-    end
-end
-
-if num_pilot_excluded > 0
-    fprintf('  Pilot events excluded: %d\n', num_pilot_excluded);
-end
-fprintf('  Study trials: %d\n', num_study);
-fprintf('  ASSOC trials: %d (Intact: %d, Recombined: %d)\n', num_assoc_intact + num_assoc_recomb, num_assoc_intact, num_assoc_recomb);
-fprintf('  ITEM trials: %d (Old: %d, New: %d)\n\n', num_item_old + num_item_new, num_item_old, num_item_new);
-
-for i = 1:size(assoc_trials, 1)
-    if assoc_trials(i, 10) == 21
-        w1_id = assoc_trials(i, 4);
-        accuracy = assoc_trials(i, 8);
-
-        study_idx = find(study_trials(:, 4) == w1_id);
-        if ~isempty(study_idx)
-            study_trials(study_idx(1), 8) = accuracy;
-            study_trials(study_idx(1), 10) = 11;
-        end
-    end
-end
-
-unmatched = find(study_trials(:, 10) == -2);
-study_trials(unmatched, 10) = 12;
-
-alleeg = sortrows([study_trials; assoc_trials; item_trials], 1);
 
 behavioral_file = fullfile(output_folder, sprintf('behavioral_%d.log', subject_id));
 fid = fopen(behavioral_file, 'w');
 if fid == -1
     error('Could not open output file for writing: %s', behavioral_file);
 end
-
 fprintf(fid, '# Behavioral events for subject %d\n', subject_id);
 fprintf(fid, '# Source session file: %s\n', session_filename);
-fprintf(fid, '# Columns: timestamp, block, trial, pad1, pad2, word1_id, word2_id, ipi/target, accuracy, event_type\n');
-
-for i = 1:size(alleeg, 1)
-    code = alleeg(i, 10);
-    switch code
-        case 11
-            label = 'Study_Intact';
-        case 12
-            label = 'Study_Recombined';
-        case 21
-            label = 'Test_Intact';
-        case 22
-            label = 'Test_Recombined';
-        case 31
-            label = 'Test_Old';
-        case 32
-            label = 'Test_New';
-        otherwise
-            label = 'Unknown';
-    end
-
-    fprintf(fid, '%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%.0f\t%s\n', alleeg(i, 1:9), label);
+fprintf(fid, 'timestamp\tblock\ttrial\tword1_id\tword2_id\ttarget\tresponse\taccuracy\trt\ttrigger_code\tevent_label\n');
+for i = 1:numel(events)
+    fprintf(fid, '%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\n', ...
+        events(i).timestamp, events(i).block, events(i).trial, events(i).word1_id, ...
+        events(i).word2_id, events(i).target, events(i).response, events(i).accuracy, ...
+        events(i).rt, events(i).trigger_code, events(i).event_label);
 end
 fclose(fid);
-
 fprintf('  Saved: %s\n\n', behavioral_file);
 
 %% Part 2: EEG Time Alignment
@@ -434,9 +323,8 @@ if length(diffeeglogtime_sample) > length(correcteddiffnstime_sample)
         mindiff = min(aligndiff);
 
         if maxdiff > 16 || mindiff < -16
-            check = 0;
             ii = ii + 1;
-        elseif maxdiff < 16 && mindiff > -16
+        else
             check = 1;
             max_dev = [maxdiff mindiff];
             alignindex = ii;
@@ -463,9 +351,8 @@ elseif length(diffeeglogtime_sample) < length(correcteddiffnstime_sample)
         mindiff = min(aligndiff);
 
         if maxdiff > 16 || mindiff < -16
-            check = 0;
             ii = ii + 1;
-        elseif maxdiff < 16 && mindiff > -16
+        else
             check = 1;
             max_dev = [maxdiff mindiff];
             alignindex = ii;
@@ -513,41 +400,33 @@ if P(1) <= 0.999
     error('Alignment quality poor (slope = %.6f). Check eeglog!', P(1));
 end
 
-newlat = (alleeg(:, 1) - uptime(ii)) * P(1) + P(2);
-newevents = [alleeg newlat];
+for i = 1:numel(events)
+    events(i).latency = (events(i).timestamp - uptime(ii)) * P(1) + P(2);
+end
 
 eeg_events_file = fullfile(output_folder, sprintf('EEGevents_%d.txt', subject_id));
-dlmwrite(eeg_events_file, newevents, 'delimiter', '\t', 'precision', 10);
+fid = fopen(eeg_events_file, 'w');
+if fid == -1
+    error('Could not open output file for writing: %s', eeg_events_file);
+end
+for i = 1:numel(events)
+    fprintf(fid, '%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%.10f\n', ...
+        events(i).timestamp, events(i).block, events(i).trial, events(i).word1_id, ...
+        events(i).word2_id, events(i).target, events(i).response, events(i).accuracy, ...
+        events(i).rt, events(i).trigger_code, events(i).event_label, events(i).latency);
+end
+fclose(fid);
 fprintf('  Saved: %s\n\n', eeg_events_file);
 
-%% Part 3: Import Events into EEGLAB
+%% Part 3: Import events into EEGLAB
 fprintf('STEP 3: Importing events into EEGLAB...\n');
 
 EEG = pop_importevent(EEG, 'append', 'no', 'event', eeg_events_file, ...
     'fields', {'unixtime', 'block', 'trial', 'W1id', 'W2id', ...
-               'target', 'response', 'accuracy', 'RT', 'type', 'latency'}, ...
+               'target', 'response', 'accuracy', 'RT', 'type', 'event_label', 'latency'}, ...
     'timeunit', 0.001);
 
 fprintf('  Events imported: %d\n', length(EEG.event));
-
-for i = 1:length(EEG.event)
-    switch EEG.event(i).type
-        case 11
-            EEG.event(i).event_label = 'Study_Intact';
-        case 12
-            EEG.event(i).event_label = 'Study_Recombined';
-        case 21
-            EEG.event(i).event_label = 'Test_Intact';
-        case 22
-            EEG.event(i).event_label = 'Test_Recombined';
-        case 31
-            EEG.event(i).event_label = 'Test_Old';
-        case 32
-            EEG.event(i).event_label = 'Test_New';
-        otherwise
-            EEG.event(i).event_label = 'Unknown';
-    end
-end
 
 output_eeg_file = sprintf('processed_%d.set', subject_id);
 EEG = pop_saveset(EEG, 'filename', output_eeg_file, 'filepath', output_folder); %#ok<NASGU>
@@ -562,4 +441,241 @@ fprintf('  EEG dataset:      %s\n', fullfile(output_folder, output_eeg_file));
 fprintf('  Alignment params: %s\n', alignment_file);
 fprintf('==============================================\n\n');
 
+end
+
+function events = read_session_events(session_file)
+lines = read_text_lines(session_file);
+if isempty(lines)
+    error('Session log is empty: %s', session_file);
+end
+
+[header_idx, header_parts, header_norm] = detect_header_line(lines, session_file);
+
+idx_timestamp = resolve_required_column(header_norm, {'timestamp', 'unixtime', 'unix_time'}, 'timestamp');
+idx_block = resolve_optional_column(header_norm, {'block'});
+idx_trial = resolve_optional_column(header_norm, {'trial'});
+idx_trigger = resolve_required_column(header_norm, {'trigger_code', 'trigger', 'type', 'event_code'}, 'trigger_code');
+idx_event_label = resolve_required_column(header_norm, {'event_label', 'trial_type', 'condition'}, 'event_label');
+
+idx_word1 = resolve_optional_column(header_norm, {'word1_id', 'w1id', 'word1', 'word1id'});
+idx_word2 = resolve_optional_column(header_norm, {'word2_id', 'w2id', 'word2', 'word2id'});
+idx_target = resolve_optional_column(header_norm, {'target'});
+idx_response = resolve_optional_column(header_norm, {'response'});
+idx_accuracy = resolve_optional_column(header_norm, {'accuracy', 'acc'});
+idx_rt = resolve_optional_column(header_norm, {'rt', 'rt_ms'});
+idx_include = resolve_optional_column(header_norm, {'include_in_analysis', 'include'});
+
+events = struct('timestamp', {}, 'block', {}, 'trial', {}, 'word1_id', {}, ...
+                'word2_id', {}, 'target', {}, 'response', {}, 'accuracy', {}, ...
+                'rt', {}, 'trigger_code', {}, 'event_label', {}, 'latency', {});
+
+for line_idx = (header_idx + 1):numel(lines)
+    raw_line = lines{line_idx};
+    if isempty(strtrim(raw_line))
+        continue;
+    end
+
+    parts = regexp(raw_line, '\t', 'split');
+    if numel(parts) < numel(header_parts)
+        parts(end+1:numel(header_parts)) = {''};
+    elseif numel(parts) > numel(header_parts)
+        parts = parts(1:numel(header_parts));
+    end
+
+    event_label = strtrim(parts{idx_event_label});
+    if isempty(event_label)
+        continue;
+    end
+
+    if ~isempty(idx_include)
+        include_value = parse_include_flag(parts{idx_include});
+        if ~include_value
+            continue;
+        end
+    end
+
+    timestamp = parse_numeric(parts{idx_timestamp});
+    trigger_code = parse_numeric(parts{idx_trigger});
+
+    if isnan(timestamp)
+        warning('Skipping line %d in %s: invalid timestamp.', line_idx, session_file);
+        continue;
+    end
+    if isnan(trigger_code)
+        warning('Skipping line %d in %s: invalid trigger_code.', line_idx, session_file);
+        continue;
+    end
+
+    e = struct();
+    e.timestamp = timestamp;
+    e.block = parse_optional_numeric(parts, idx_block, -1);
+    e.trial = parse_optional_numeric(parts, idx_trial, -1);
+    e.word1_id = parse_optional_numeric(parts, idx_word1, -1);
+    e.word2_id = parse_optional_numeric(parts, idx_word2, -1);
+    e.target = parse_optional_numeric(parts, idx_target, -1);
+    e.response = parse_optional_numeric(parts, idx_response, -1);
+    e.accuracy = parse_optional_numeric(parts, idx_accuracy, -1);
+    e.rt = parse_optional_numeric(parts, idx_rt, -1);
+    e.trigger_code = trigger_code;
+    e.event_label = sanitize_event_label(event_label);
+    e.latency = NaN;
+
+    events(end+1) = e; %#ok<AGROW>
+end
+
+if isempty(events)
+    error('No analyzable events were found in session log: %s', session_file);
+end
+
+[~, sort_idx] = sort([events.timestamp]);
+events = events(sort_idx);
+end
+
+function [header_idx, header_parts, header_norm] = detect_header_line(lines, session_file)
+header_idx = [];
+header_parts = {};
+header_norm = {};
+
+for i = 1:numel(lines)
+    line = strtrim(lines{i});
+    if isempty(line)
+        continue;
+    end
+
+    parts = regexp(line, '\t', 'split');
+    norm_parts = cellfun(@normalize_col_name, parts, 'UniformOutput', false);
+
+    has_timestamp = has_any_alias(norm_parts, {'timestamp', 'unixtime', 'unix_time'});
+    has_trigger = has_any_alias(norm_parts, {'trigger_code', 'trigger', 'type', 'event_code'});
+    has_event_label = has_any_alias(norm_parts, {'event_label', 'trial_type', 'condition'});
+
+    if has_timestamp && has_trigger && has_event_label
+        header_idx = i;
+        header_parts = parts;
+        header_norm = norm_parts;
+        return;
+    end
+end
+
+error(['Could not locate a valid session-log header in %s. ' ...
+       'Expected a tab-delimited header containing timestamp, trigger_code, and event_label (or aliases).'], ...
+      session_file);
+end
+
+function tf = has_any_alias(header_norm, aliases)
+tf = false;
+for i = 1:numel(aliases)
+    candidate = normalize_col_name(aliases{i});
+    if any(strcmp(header_norm, candidate))
+        tf = true;
+        return;
+    end
+end
+end
+
+function lines = read_text_lines(file_path)
+fid = fopen(file_path, 'r');
+if fid == -1
+    error('Could not open file: %s', file_path);
+end
+lines = {};
+while ~feof(fid)
+    tline = fgetl(fid);
+    if ischar(tline)
+        lines{end+1} = tline; %#ok<AGROW>
+    end
+end
+fclose(fid);
+end
+
+function idx = resolve_required_column(header_norm, aliases, display_name)
+idx = resolve_optional_column(header_norm, aliases);
+if isempty(idx)
+    error('Required column "%s" not found in session log header.', display_name);
+end
+end
+
+function idx = resolve_optional_column(header_norm, aliases)
+idx = [];
+for i = 1:numel(aliases)
+    candidate = normalize_col_name(aliases{i});
+    hit = find(strcmp(header_norm, candidate), 1, 'first');
+    if ~isempty(hit)
+        idx = hit;
+        return;
+    end
+end
+end
+
+function out = normalize_col_name(in)
+out = lower(strtrim(in));
+out = strrep(out, char(65279), '');
+out = strrep(out, ' ', '_');
+out = strrep(out, '-', '_');
+end
+
+function n = parse_numeric(raw)
+if isnumeric(raw)
+    if isscalar(raw)
+        n = raw;
+    else
+        n = NaN;
+    end
+    return;
+end
+
+if isstring(raw)
+    raw = char(raw);
+elseif ~ischar(raw)
+    n = NaN;
+    return;
+end
+
+raw = strtrim(raw);
+n = str2double(raw);
+if ~isnan(n)
+    return;
+end
+
+match = regexp(raw, '-?\d+(\.\d+)?', 'match', 'once');
+if isempty(match)
+    n = NaN;
+else
+    n = str2double(match);
+end
+end
+
+function n = parse_numeric_or_default(raw, default_value)
+n = parse_numeric(raw);
+if isnan(n)
+    n = default_value;
+end
+end
+
+function n = parse_optional_numeric(parts, idx, default_value)
+if isempty(idx)
+    n = default_value;
+else
+    n = parse_numeric_or_default(parts{idx}, default_value);
+end
+end
+
+function include_value = parse_include_flag(raw)
+value = lower(strtrim(raw));
+if isempty(value)
+    include_value = true;
+elseif any(strcmp(value, {'1', 'true', 'yes', 'y'}))
+    include_value = true;
+elseif any(strcmp(value, {'0', 'false', 'no', 'n'}))
+    include_value = false;
+else
+    include_value = true;
+end
+end
+
+function label = sanitize_event_label(raw)
+label = strtrim(raw);
+label = strrep(label, sprintf('\t'), ' ');
+label = strrep(label, sprintf('\n'), ' ');
+label = strrep(label, sprintf('\r'), ' ');
 end

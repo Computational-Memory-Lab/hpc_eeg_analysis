@@ -5,8 +5,8 @@ function hpc_limo_channel_time_plots(input_folder, output_dir)
 %   hpc_limo_channel_time_plots(input_folder, output_dir)
 %
 % Inputs:
-%   input_folder - Path to a limo_second_level_<p1>_<p2> folder containing
-%                  LIMO.mat and paired_samples_ttest_parameter_<p1p2>.mat
+%   input_folder - Path to a limo_second_level_<output_tag> folder containing
+%                  LIMO.mat and paired_samples_ttest_parameter_*.mat
 %   output_dir   - Directory to save the output .png files
 %
 % Outputs:
@@ -14,8 +14,8 @@ function hpc_limo_channel_time_plots(input_folder, output_dir)
 %   - <output_dir>/<test_name>_channel_time_plot_LR.png   Likelihood ratio plot (if data exists)
 %   - <output_dir>/<test_name>_topoplots.png              Topoplot grid at multiple time points
 %
-% The test_name and parameter_num are derived from the input_folder name.
-% Example: limo_second_level_3_4  ->  test_name='limo_second_level_3_4', parameter_num=34
+% The test_name is derived from the input_folder name.
+% Example: limo_second_level_test_hits_vs_test_misses
 
 % ==================== PARSE INPUT FOLDER ====================
 [~, folder_name] = fileparts(input_folder);
