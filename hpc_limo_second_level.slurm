@@ -15,7 +15,7 @@
 #   4=Test_misses 5=Correct_rejections 6=False_alarms
 # Output will be written to: INPUT_FOLDER/limo_second_level_<P1>_<P2>/
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/mydata/interpol/epoch/limo_first_level"
+INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch/limo_first_level"
 P1=3
 P2=4
 

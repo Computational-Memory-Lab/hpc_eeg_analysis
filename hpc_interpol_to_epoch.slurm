@@ -9,14 +9,14 @@
 #SBATCH --mem=128G
 
 # ============================================================
-# INPUT: the interpol/ folder produced by hpc_raw_to_interpol
+# INPUT: the interpol/ folder produced by hpc_set_to_interpol
 # Output will be written to: INPUT_FOLDER/epoch/
 #
 # Optional: set voltage thresholds (uncomment to override defaults)
 #   Default voltage_diff_threshold = 20 uV
 #   Default voltage_abs_threshold  = 1000 uV
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/mydata/interpol"
+INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol"
 # VOLTAGE_DIFF=20
 # VOLTAGE_ABS=1000
 

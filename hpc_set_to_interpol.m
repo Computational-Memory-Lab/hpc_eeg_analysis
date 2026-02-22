@@ -1,11 +1,11 @@
-function hpc_raw_to_interpol(input_folder)
-% HPC_RAW_TO_INTERPOL - Apply filtering and channel rejection to EEG data
+function hpc_set_to_interpol(input_folder)
+% HPC_SET_TO_INTERPOL - Apply filtering and channel rejection to EEG data
 %
 % Usage:
-%   hpc_raw_to_interpol(input_folder)
+%   hpc_set_to_interpol(input_folder)
 %
 % Inputs:
-%   input_folder - Path to folder containing raw .set files to process
+%   input_folder - Path to folder containing behaviorally aligned .set files to process
 %
 % Outputs:
 %   - <input_folder>/interpol/preprocessed_full_<ID>.set  Filtered and cleaned EEG datasets

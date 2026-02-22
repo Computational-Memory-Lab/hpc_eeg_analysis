@@ -1,23 +1,26 @@
 #!/bin/bash
 #SBATCH --account=def-jcaplan
-#SBATCH --job-name=hpc_limo_first_level
+#SBATCH --job-name=hpc_set_to_interpol
 #SBATCH --output=/home/devon7y/scratch/devon7y/logs/%x_%j.out
 #SBATCH --error=/home/devon7y/scratch/devon7y/logs/%x_%j.err
-#SBATCH --time=00:30:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 
 # ============================================================
-# INPUT: the epoch/ folder produced by hpc_interpol_to_epoch
-# Output will be written to: INPUT_FOLDER/limo_first_level/
+# INPUT: folder containing behavioral .set files to preprocess
+# Output will be written to: INPUT_FOLDER/interpol/
 # ============================================================
-INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch"
+INPUT_FOLDER="/home/devon7y/scratch/devon7y/initial_set/behavioral_set"
 
 module load matlab/2023b
+module load StdEnv/2023
 
 matlab -nodisplay -nosplash -r "\
-addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
+restoredefaultpath; \
+addpath('/home/devon7y/scratch/devon7y/eeglab2025.0.0'); \
+eeglab nogui; \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_limo_first_level('${INPUT_FOLDER}'); \
+hpc_set_to_interpol('${INPUT_FOLDER}'); \
 exit;"
