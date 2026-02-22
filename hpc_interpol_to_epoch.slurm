@@ -3,6 +3,8 @@
 #SBATCH --job-name=hpc_interpol_to_epoch
 #SBATCH --output=/home/devon7y/scratch/devon7y/logs/%x_%j.out
 #SBATCH --error=/home/devon7y/scratch/devon7y/logs/%x_%j.err
+# Default log path above is a fallback.
+# Prefer passing --output/--error at sbatch time to stage-local logs folders.
 #SBATCH --time=00:05:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64

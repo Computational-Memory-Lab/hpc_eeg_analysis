@@ -142,6 +142,8 @@ Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
 
 Also include use of submit_pipeline.sh where appropriate, but emphasize that the Skill must support partial pipelines and not force full runs.
 For full runs from raw input, prefer Stage 1-3 as SLURM arrays (subject-level parallelism).
+When submitting jobs, prefer `--output` / `--error` paths under each stage output folder's `logs/` subdirectory instead of a single global logs folder.
+For array jobs, use `%A_%a` in log filenames.
 
 ============================================================
 OUTPUT FORMAT YOU MUST PRODUCE

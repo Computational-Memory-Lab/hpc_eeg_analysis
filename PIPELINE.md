@@ -183,6 +183,8 @@ Output:
 ## SLURM Scripts
 
 Each SLURM script accepts environment-variable overrides via `sbatch --export`.
+By default, script headers write to `/home/devon7y/scratch/devon7y/logs/`.
+For organized runs, override `--output` and `--error` at submission time.
 
 - `hpc_raw_to_set.slurm`
   - `INPUT_FOLDER`
@@ -223,6 +225,13 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
   - `ARRAY_THROTTLE_STAGE1`
   - `ARRAY_THROTTLE_STAGE2`
   - `ARRAY_THROTTLE_STAGE3`
+- stage-local log placement via `sbatch --output/--error`:
+  - Stage 1 logs: `<initial_set>/logs/raw_to_set/`
+  - Stage 2 logs: `<interpol>/logs/set_to_interpol/`
+  - Stage 3 logs: `<epoch>/logs/interpol_to_epoch/`
+  - Stage 4 logs: `<limo_first_level>/logs/limo_first_level/`
+  - Stage 5 logs: `<limo_second_level_<key>>/logs/limo_second_level/`
+  - Stage 6 logs: `<PLOTS>/logs/channel_time_plots/<key>/`
 
 Monitor jobs:
 

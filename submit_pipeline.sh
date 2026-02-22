@@ -50,6 +50,15 @@ FIRST_LEVEL="${EPOCH}/limo_first_level"
 MANIFEST_DIR="${PARENT_DIR}/pipeline_manifests"
 mkdir -p "${MANIFEST_DIR}"
 
+# Per-stage log folders (each under that stage's output location)
+LOG_STAGE1_DIR="${INITIAL_SET}/logs/raw_to_set"
+LOG_STAGE2_DIR="${INTERPOL}/logs/set_to_interpol"
+LOG_STAGE3_DIR="${EPOCH}/logs/interpol_to_epoch"
+LOG_STAGE4_DIR="${FIRST_LEVEL}/logs/limo_first_level"
+LOG_PLOTS_DIR="${PLOTS}/logs/channel_time_plots"
+
+mkdir -p "${LOG_STAGE1_DIR}" "${LOG_STAGE2_DIR}" "${LOG_STAGE3_DIR}" "${LOG_STAGE4_DIR}" "${LOG_PLOTS_DIR}"
+
 if [[ ! -d "${RAW_INPUT}" ]]; then
   echo "ERROR: RAW_INPUT folder does not exist: ${RAW_INPUT}" >&2
   exit 1
@@ -117,6 +126,8 @@ echo "Subjects detected:        ${NUM_SUBJECTS}"
 # ============================================================
 JOB1=$(sbatch --parsable \
   --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE1} \
+  --output="${LOG_STAGE1_DIR}/%x_%A_%a.out" \
+  --error="${LOG_STAGE1_DIR}/%x_%A_%a.err" \
   --export=ALL,INPUT_FOLDER="${RAW_INPUT}",SUBJECTS_FILE="${SUBJECTS_FILE}" \
   "${SCRIPTS}/hpc_raw_to_set.slurm")
 echo "Submitted job1 array (raw_to_set):            ${JOB1}"
@@ -127,6 +138,8 @@ echo "Submitted job1 array (raw_to_set):            ${JOB1}"
 JOB2=$(sbatch --parsable \
   --dependency=afterok:${JOB1} \
   --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE2} \
+  --output="${LOG_STAGE2_DIR}/%x_%A_%a.out" \
+  --error="${LOG_STAGE2_DIR}/%x_%A_%a.err" \
   --export=ALL,INPUT_FOLDER="${BEHAVIORAL_SET}",SUBJECTS_FILE="${SUBJECTS_FILE}" \
   "${SCRIPTS}/hpc_set_to_interpol.slurm")
 echo "Submitted job2 array (set_to_interpol):       ${JOB2}"
@@ -137,6 +150,8 @@ echo "Submitted job2 array (set_to_interpol):       ${JOB2}"
 JOB3=$(sbatch --parsable \
   --dependency=afterok:${JOB2} \
   --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE3} \
+  --output="${LOG_STAGE3_DIR}/%x_%A_%a.out" \
+  --error="${LOG_STAGE3_DIR}/%x_%A_%a.err" \
   --export=ALL,INPUT_FOLDER="${INTERPOL}",SUBJECTS_FILE="${SUBJECTS_FILE}",VOLTAGE_DIFF="${VOLTAGE_DIFF}",VOLTAGE_ABS="${VOLTAGE_ABS}",EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV}",EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC}" \
   "${SCRIPTS}/hpc_interpol_to_epoch.slurm")
 echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
@@ -146,6 +161,8 @@ echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
 # ============================================================
 JOB4=$(sbatch --parsable \
   --dependency=afterok:${JOB3} \
+  --output="${LOG_STAGE4_DIR}/%x_%j.out" \
+  --error="${LOG_STAGE4_DIR}/%x_%j.err" \
   --export=ALL,INPUT_FOLDER="${EPOCH}",CONDITION_ORDER="${CONDITION_ORDER}" \
   "${SCRIPTS}/hpc_limo_first_level.slurm")
 echo "Submitted job4 (limo_first_level):            ${JOB4}"
@@ -156,10 +173,15 @@ echo "Submitted job4 (limo_first_level):            ${JOB4}"
 declare -A JOB5
 for ITEM in "${COMPARISONS[@]}"; do
   IFS='|' read -r KEY C1 C2 TITLE <<< "${ITEM}"
+  SECOND_LEVEL_DIR="${FIRST_LEVEL}/limo_second_level_${KEY}"
+  LOG_STAGE5_DIR="${SECOND_LEVEL_DIR}/logs/limo_second_level"
+  mkdir -p "${LOG_STAGE5_DIR}"
 
   JOB5["${KEY}"]=$(sbatch --parsable \
     --dependency=afterok:${JOB4} \
     --job-name="hpc_second_level_${KEY}" \
+    --output="${LOG_STAGE5_DIR}/%x_%j.out" \
+    --error="${LOG_STAGE5_DIR}/%x_%j.err" \
     --export=ALL,INPUT_FOLDER="${FIRST_LEVEL}",C1_LABEL="${C1}",C2_LABEL="${C2}",CONTRAST_KEY="${KEY}" \
     "${SCRIPTS}/hpc_limo_second_level.slurm")
 
@@ -172,10 +194,14 @@ done
 for ITEM in "${COMPARISONS[@]}"; do
   IFS='|' read -r KEY C1 C2 TITLE <<< "${ITEM}"
   SECOND_LEVEL_DIR="${FIRST_LEVEL}/limo_second_level_${KEY}"
+  LOG_STAGE6_DIR="${LOG_PLOTS_DIR}/${KEY}"
+  mkdir -p "${LOG_STAGE6_DIR}"
 
   JOB6=$(sbatch --parsable \
     --dependency=afterok:${JOB5[${KEY}]} \
     --job-name="hpc_plots_${KEY}" \
+    --output="${LOG_STAGE6_DIR}/%x_%j.out" \
+    --error="${LOG_STAGE6_DIR}/%x_%j.err" \
     --export=ALL,INPUT_FOLDER="${SECOND_LEVEL_DIR}",OUTPUT_DIR="${PLOTS}" \
     "${SCRIPTS}/hpc_limo_channel_time_plots.slurm")
 
@@ -189,6 +215,13 @@ echo "Array throttles:"
 echo "  stage1: ${ARRAY_THROTTLE_STAGE1}"
 echo "  stage2: ${ARRAY_THROTTLE_STAGE2}"
 echo "  stage3: ${ARRAY_THROTTLE_STAGE3}"
+echo "Log folders:"
+echo "  stage1: ${LOG_STAGE1_DIR}"
+echo "  stage2: ${LOG_STAGE2_DIR}"
+echo "  stage3: ${LOG_STAGE3_DIR}"
+echo "  stage4: ${LOG_STAGE4_DIR}"
+echo "  stage5: ${FIRST_LEVEL}/limo_second_level_<key>/logs/limo_second_level"
+echo "  stage6: ${LOG_PLOTS_DIR}"
 echo "Derived folders:"
 echo "  initial_set:    ${INITIAL_SET}"
 echo "  behavioral_set: ${BEHAVIORAL_SET}"
