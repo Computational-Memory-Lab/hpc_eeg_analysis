@@ -20,6 +20,7 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %   topoplot_layout_type - Optional topoplot layout:
 %                        'grid'   (default): near-square grid layout
 %                        'zigzag' : staggered left-to-right zigzag line
+%                        'line'   : single horizontal row
 %
 % Outputs:
 %   - <output_dir>/<test_name>_channel_time_plot.png      Signed -log10(p) channel-time plot
@@ -698,8 +699,10 @@ end
 switch layout_type
     case {'grid', 'square', 'square_grid', 'square-grid'}
         layout_type = 'grid';
-    case {'zigzag', 'zigzag_line', 'zigzag-line', 'staggered', 'staggered_line', 'staggered-line', 'line'}
+    case {'zigzag', 'zigzag_line', 'zigzag-line', 'staggered', 'staggered_line', 'staggered-line'}
         layout_type = 'zigzag';
+    case {'line', 'horizontal', 'row', 'single_row', 'single-row', 'one_row', 'one-row'}
+        layout_type = 'line';
     otherwise
         warning('Unknown topoplot layout type "%s". Falling back to "grid".', layout_type);
         layout_type = 'grid';
@@ -757,6 +760,48 @@ switch layout_type
                 else
                     y_center_px = y_low_px;
                 end
+                ax_positions(idx, :) = [ ...
+                    (x_center_px - d_px/2) / fig_width, ...
+                    (y_center_px - d_px/2) / fig_height, ...
+                    d_px / fig_width, ...
+                    d_px / fig_height];
+            end
+        end
+        colorbar_position = [0.92 0.16 0.03 0.68];
+
+    case 'line'
+        % Single horizontal row with even spacing.
+        fig_width = max(2600, 900 + 130 * num_plots);
+        fig_height = 700;
+
+        left_px   = plot_region(1) * fig_width;
+        bottom_px = plot_region(2) * fig_height;
+        region_w_px = plot_region(3) * fig_width;
+        region_h_px = plot_region(4) * fig_height;
+
+        ax_positions = zeros(num_plots, 4);
+        if num_plots == 1
+            d_px = min(region_w_px, region_h_px) * 0.72;
+            x_center_px = left_px + region_w_px / 2;
+            y_center_px = bottom_px + region_h_px * 0.55;
+            ax_positions(1, :) = [ ...
+                (x_center_px - d_px/2) / fig_width, ...
+                (y_center_px - d_px/2) / fig_height, ...
+                d_px / fig_width, ...
+                d_px / fig_height];
+        else
+            gap_ratio = 0.08;
+            d_px_by_width = region_w_px / (num_plots + (num_plots - 1) * gap_ratio);
+            d_px_by_height = region_h_px * 0.78;
+            d_px = min(d_px_by_width, d_px_by_height);
+            gap_px = gap_ratio * d_px;
+            total_w_px = num_plots * d_px + (num_plots - 1) * gap_px;
+
+            x_first_px = left_px + (region_w_px - total_w_px) / 2 + d_px / 2;
+            y_center_px = bottom_px + region_h_px * 0.55;
+
+            for idx = 1:num_plots
+                x_center_px = x_first_px + (idx - 1) * (d_px + gap_px);
                 ax_positions(idx, :) = [ ...
                     (x_center_px - d_px/2) / fig_width, ...
                     (y_center_px - d_px/2) / fig_height, ...
