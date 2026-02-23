@@ -1,21 +1,49 @@
-function hpc_limo_channel_time_plots(input_folder, output_dir)
+function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 % HPC_LIMO_CHANNEL_TIME_PLOTS - Generate channel-time and topoplot figures
 %
 % Usage:
 %   hpc_limo_channel_time_plots(input_folder, output_dir)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 %
 % Inputs:
 %   input_folder - Path to a limo_second_level_<output_tag> folder containing
 %                  LIMO.mat and paired_samples_ttest_parameter_*.mat
 %   output_dir   - Directory to save the output .png files
+%   title_base   - Optional custom base contrast title used to build default
+%                  titles, e.g. 'Test_hits vs Correct_rejection'
+%   channel_time_title - Optional full custom channel-time figure title.
+%   topoplot_title     - Optional full custom topoplot figure title.
+%   lr_title           - Optional full custom likelihood-ratio figure title.
 %
 % Outputs:
 %   - <output_dir>/<test_name>_channel_time_plot.png      Signed -log10(p) channel-time plot
+%   - <output_dir>/<test_name>_channel_time_plot.svg      Signed -log10(p) channel-time plot (SVG)
 %   - <output_dir>/<test_name>_channel_time_plot_LR.png   Likelihood ratio plot (if data exists)
 %   - <output_dir>/<test_name>_topoplots.png              Topoplot grid at multiple time points
+%   - <output_dir>/<test_name>_topoplots.svg              Topoplot grid at multiple time points (SVG)
 %
 % The test_name is derived from the input_folder name.
 % Example: limo_second_level_test_hits_vs_test_misses
+
+if nargin < 3 || isempty(title_base)
+    title_base = '';
+end
+if nargin < 4 || isempty(channel_time_title)
+    channel_time_title = '';
+end
+if nargin < 5 || isempty(topoplot_title)
+    topoplot_title = '';
+end
+if nargin < 6 || isempty(lr_title)
+    lr_title = '';
+end
+
+title_base = strtrim(char(title_base));
+channel_time_title = strtrim(char(channel_time_title));
+topoplot_title = strtrim(char(topoplot_title));
+lr_title = strtrim(char(lr_title));
 
 % ==================== PARSE INPUT FOLDER ====================
 [~, folder_name] = fileparts(input_folder);
@@ -29,6 +57,19 @@ end
 tok = regexp(mat_files(1).name, 'paired_samples_ttest_parameter_(\d+)\.mat', 'tokens');
 parameter_num = str2double(tok{1}{1});
 test_name = folder_name;
+display_contrast_name = derive_display_contrast_name(input_folder, folder_name);
+if ~isempty(title_base)
+    display_contrast_name = normalize_title_label(title_base);
+end
+
+default_channel_time_title = sprintf('%s Channel-Time Plot (TFCE-corrected)', display_contrast_name);
+default_topoplot_title = sprintf('%s Topoplots (TFCE-corrected)', display_contrast_name);
+default_lr_title = sprintf('%s Likelihood Ratios', display_contrast_name);
+
+fprintf('Default Step 6 titles:\n');
+fprintf('  Channel-time: %s\n', default_channel_time_title);
+fprintf('  Topoplots:    %s\n', default_topoplot_title);
+fprintf('  LR:           %s\n', default_lr_title);
 
 % ==================== SETUP ====================
 if ~exist(output_dir, 'dir')
@@ -106,7 +147,8 @@ if has_likelihood_data
 end
 
 % ==================== CHANNEL-TIME PLOT ====================
-output_file  = fullfile(output_dir, sprintf('%s_channel_time_plot.png', test_name));
+output_file_png = fullfile(output_dir, sprintf('%s_channel_time_plot.png', test_name));
+output_file_svg = fullfile(output_dir, sprintf('%s_channel_time_plot.svg', test_name));
 alpha_threshold = 0.05;
 alpha_nonsig    = 0.4;
 
@@ -121,18 +163,33 @@ end
 cc = limo_color_images([-abs_max_val, abs_max_val]);
 
 times = linspace(LIMO.data.start, LIMO.data.end, size(t_values,2));
+channel_time_raster_scale = 4;
 
-fig_exp = figure('Visible', 'off', 'Position', [100 100 1000 700], 'Color', 'w', 'InvertHardcopy', 'off');
+fig_exp = figure('Visible', 'off', 'Position', [100 100 1500 700], 'Color', 'w', 'InvertHardcopy', 'off');
 colormap(fig_exp, cc);
 
 imgax_exp = axes('Position', [0.08 0.12 0.78 0.68]);
 set(imgax_exp, 'Color', [0.9 0.9 0.9], 'XColor', 'k', 'YColor', 'k', 'Box', 'on', 'LineWidth', 1);
 
 signed_logp_data = real(signed_logp_data);
-h_img_exp = imagesc(times, 1:size(signed_logp_data,1), signed_logp_data);
+num_channels = size(signed_logp_data, 1);
+channels = 1:num_channels;
+
+times_hr = linspace(times(1), times(end), max(2, size(signed_logp_data, 2) * channel_time_raster_scale));
+channels_hr = linspace(1, num_channels, max(2, num_channels * channel_time_raster_scale));
+[time_grid, channel_grid] = meshgrid(times, channels);
+[time_grid_hr, channel_grid_hr] = meshgrid(times_hr, channels_hr);
+
+signed_logp_display = interp2(time_grid, channel_grid, signed_logp_data, ...
+    time_grid_hr, channel_grid_hr, 'linear');
+alpha_mask_display = interp2(time_grid, channel_grid, alpha_mask_significance, ...
+    time_grid_hr, channel_grid_hr, 'nearest');
+alpha_mask_display = min(max(alpha_mask_display, 0), 1);
+
+h_img_exp = imagesc(times_hr, channels_hr, signed_logp_display);
 xlim([times(1), times(end)]);
 
-set(h_img_exp, 'AlphaData', alpha_mask_significance);
+set(h_img_exp, 'AlphaData', alpha_mask_display);
 set(imgax_exp, 'Color', [0.9 0.9 0.9]);
 caxis([-abs_max_val, abs_max_val]);
 
@@ -140,7 +197,7 @@ xlabel('Time (ms)', 'Color', 'k');
 ylabel('Channel', 'Color', 'k');
 
 set(imgax_exp, 'YDir', 'reverse');
-ylim([1 size(signed_logp_data,1)]);
+ylim([1 num_channels]);
 grid(imgax_exp, 'off');
 set(imgax_exp, 'XColor', 'k', 'YColor', 'k');
 hold on;
@@ -200,7 +257,6 @@ end
 % Formatting
 set(imgax_exp, 'XColor', 'k', 'YColor', 'k', 'Box', 'on', 'LineWidth', 1, 'TickLength', [0 0]);
 
-num_channels = size(signed_logp_data, 1);
 chan_labels = {};
 does_not_begin_with_E = false;
 if isfield(LIMO.data, 'chanlocs') && ~isempty(LIMO.data.chanlocs)
@@ -219,7 +275,7 @@ if ~isempty(chan_labels) && length(chan_labels) == num_channels
     set(imgax_exp, 'YTickLabel', chan_labels(ytick_values));
 end
 
-tick_interval = 250;
+tick_interval = 200;
 min_tick = ceil(times(1) / tick_interval) * tick_interval;
 max_tick = floor(times(end) / tick_interval) * tick_interval;
 regular_ticks = min_tick:tick_interval:max_tick;
@@ -240,8 +296,11 @@ set(h_ylabel, 'Position', [ylabel_pos(1) - 25, ylabel_pos(2), ylabel_pos(3)]);
 title(h, 'signed -log10(p)', 'FontSize', 8, 'Color', 'k');
 set(h, 'FontSize', 7);
 
-plot_title = sprintf('%s With TFCE Correction', test_name);
-if ~any(p_values(:) < alpha_threshold)
+plot_title = channel_time_title;
+if isempty(plot_title)
+    plot_title = default_channel_time_title;
+end
+if isempty(channel_time_title) && ~any(p_values(:) < alpha_threshold)
     plot_title = sprintf('%s - No Significance', plot_title);
 end
 
@@ -251,16 +310,21 @@ annotation('textbox', [0, 0.78, 1, 0.10], ...
            'HorizontalAlignment', 'center', ...
            'VerticalAlignment', 'middle', ...
            'FontSize', 14, ...
-           'Color', 'k');
+           'Color', 'k', ...
+           'Interpreter', 'none');
 
 set(fig_exp, 'PaperPositionMode', 'auto');
 set(fig_exp, 'PaperUnits', 'inches');
 set(fig_exp, 'InvertHardCopy', 'off');
 
-print(fig_exp, output_file, '-dpng', '-r600');
+% Keep PNG at high-resolution raster (upsampled display), but build the
+% channel-time SVG from the native channel x time grid to avoid explosive
+% vector primitive counts and SVG renderer memory pressure.
+save_channel_time_png_and_svg(fig_exp, output_file_png, output_file_svg, ...
+    imgax_exp, h_img_exp, times, channels, signed_logp_data, alpha_mask_significance);
 close(fig_exp);
 
-fprintf('Saved channel-time plot: %s\n', output_file);
+fprintf('Saved channel-time plot PNG: %s\n', output_file_png);
 
 % ==================== LIKELIHOOD RATIO PLOT ====================
 if has_likelihood_data
@@ -395,8 +459,11 @@ if has_likelihood_data
     title(h_bf, 'log10(LR)', 'FontSize', 8, 'Color', 'k');
     set(h_bf, 'FontSize', 7);
 
-    plot_title_lr = sprintf('%s Likelihood Ratios', test_name);
-    if ~any(likelihood_values(:) > LR_strong_threshold) && ~any(likelihood_values(:) < 1/LR_strong_threshold)
+    plot_title_lr = lr_title;
+    if isempty(plot_title_lr)
+        plot_title_lr = default_lr_title;
+    end
+    if isempty(lr_title) && ~any(likelihood_values(:) > LR_strong_threshold) && ~any(likelihood_values(:) < 1/LR_strong_threshold)
         plot_title_lr = sprintf('%s - No Strong Evidence', plot_title_lr);
     end
 
@@ -406,7 +473,8 @@ if has_likelihood_data
                'HorizontalAlignment', 'center', ...
                'VerticalAlignment', 'middle', ...
                'FontSize', 14, ...
-               'Color', 'k');
+               'Color', 'k', ...
+               'Interpreter', 'none');
 
     set(fig_bf, 'PaperPositionMode', 'auto');
     set(fig_bf, 'PaperUnits', 'inches');
@@ -421,14 +489,16 @@ else
 end
 
 % ==================== TOPOPLOT GRID ====================
-output_file_topo = fullfile(output_dir, sprintf('%s_topoplots.png', test_name));
+output_file_topo_png = fullfile(output_dir, sprintf('%s_topoplots.png', test_name));
+output_file_topo_svg = fullfile(output_dir, sprintf('%s_topoplots.svg', test_name));
 max_latency = min(times(end), 2500);
-latencies = 200:200:max_latency;
+topoplot_step_ms = 50;
+latencies = topoplot_step_ms:topoplot_step_ms:max_latency;
 
 if times(1) > 0
     latencies = latencies(latencies >= times(1));
 elseif times(1) < 0
-    latencies = [times(1):200:0, 200:200:max_latency];
+    latencies = [times(1):topoplot_step_ms:0, topoplot_step_ms:topoplot_step_ms:max_latency];
     latencies = latencies(latencies >= times(1) & latencies <= times(end));
 end
 
@@ -438,7 +508,7 @@ end
 
 time_indices = arrayfun(@(x) find(abs(times - x) == min(abs(times - x)), 1), latencies);
 
-abs_max_topo = max(abs(t_values(:)));
+abs_max_topo = max(abs(signed_logp_data(:)));
 if isempty(abs_max_topo) || abs_max_topo == 0
     abs_max_topo = 1;
 end
@@ -456,11 +526,11 @@ for i = 1:num_latencies
     ax_topo = subplot(nrows, ncols, i);
     ax_handles_topo(end+1) = ax_topo;
 
-    data_timepoint = t_values(:, time_indices(i));
+    data_timepoint = signed_logp_data(:, time_indices(i));
     p_timepoint    = p_values(:, time_indices(i));
 
     data_masked = data_timepoint;
-    data_masked(p_timepoint >= 0.05) = 0;
+    data_masked(p_timepoint >= alpha_threshold) = 0;
 
     topoplot(data_masked, LIMO.data.chanlocs, ...
         'maplimits', colorbar_limits_topo, ...
@@ -496,15 +566,18 @@ h_topo = colorbar(ax_ref_topo, 'Position', [0.92 0.1 0.03 0.8]);
 tick_values_topo = [colorbar_limits_topo(1), colorbar_limits_topo(1)/2, 0, colorbar_limits_topo(2)/2, colorbar_limits_topo(2)];
 tick_labels_topo = arrayfun(@(x) sprintf('%.1f', x), tick_values_topo, 'UniformOutput', false);
 set(h_topo, 'Ticks', tick_values_topo, 'TickLabels', tick_labels_topo, 'Color', 'k', 'Box', 'on');
-title(h_topo, 't-values', 'FontSize', 10, 'Color', 'k');
+title(h_topo, 'signed -log10(p)', 'FontSize', 10, 'Color', 'k');
 set(ax_ref_topo, 'XTick', [], 'YTick', [], 'Box', 'off');
 
-plot_title_topo = sprintf('%s Topoplots (TFCE-corrected)', test_name);
-if ~any(p_values(:) < 0.05)
+plot_title_topo = topoplot_title;
+if isempty(plot_title_topo)
+    plot_title_topo = default_topoplot_title;
+end
+if isempty(topoplot_title) && ~any(p_values(:) < 0.05)
     plot_title_topo = sprintf('%s - No Significance', plot_title_topo);
 end
 
-sgtitle(plot_title_topo, 'FontSize', 14, 'Color', 'k');
+sgtitle(plot_title_topo, 'FontSize', 14, 'Color', 'k', 'Interpreter', 'none');
 
 for i = 1:length(ax_handles_topo)
     pos = get(ax_handles_topo(i), 'Position');
@@ -515,11 +588,165 @@ set(fig_topo, 'PaperPositionMode', 'auto');
 set(fig_topo, 'PaperUnits', 'inches');
 set(fig_topo, 'InvertHardCopy', 'off');
 
-print(fig_topo, output_file_topo, '-dpng', '-r600');
+save_png_and_svg(fig_topo, output_file_topo_png, output_file_topo_svg);
 close(fig_topo);
 
-fprintf('Saved topoplot grid: %s\n', output_file_topo);
+fprintf('Saved topoplot grid PNG: %s\n', output_file_topo_png);
 
 fprintf('\nAll plots completed! Saved to: %s\n', output_dir);
 
+end
+
+function display_name = derive_display_contrast_name(input_folder, folder_name)
+[label1, label2] = read_contrast_labels_from_metadata(input_folder);
+if ~isempty(label1) && ~isempty(label2)
+    display_name = sprintf('%s vs %s', ...
+        normalize_title_label(label1), normalize_title_label(label2));
+    return;
+end
+
+prefix = 'limo_second_level_';
+if startsWith(folder_name, prefix)
+    contrast_key = folder_name((length(prefix) + 1):end);
+else
+    contrast_key = folder_name;
+end
+
+parts = strsplit(contrast_key, '_vs_');
+if numel(parts) == 2 && ~isempty(parts{1}) && ~isempty(parts{2})
+    display_name = sprintf('%s vs %s', ...
+        normalize_title_label(parts{1}), normalize_title_label(parts{2}));
+else
+    display_name = normalize_title_label(contrast_key);
+end
+end
+
+function [label1, label2] = read_contrast_labels_from_metadata(input_folder)
+label1 = '';
+label2 = '';
+meta_file = fullfile(input_folder, 'contrast_metadata.txt');
+if ~exist(meta_file, 'file')
+    return;
+end
+
+fid = fopen(meta_file, 'r');
+if fid == -1
+    return;
+end
+
+cleanup_obj = onCleanup(@() fclose(fid));
+while ~feof(fid)
+    line = fgetl(fid);
+    if ~ischar(line)
+        continue;
+    end
+    line = strtrim(line);
+    if isempty(line)
+        continue;
+    end
+
+    parts = strsplit(line, sprintf('\t'));
+    if numel(parts) < 2
+        continue;
+    end
+
+    key = lower(strtrim(parts{1}));
+    value = strtrim(strjoin(parts(2:end), sprintf('\t')));
+    if strcmp(key, 'label1')
+        label1 = value;
+    elseif strcmp(key, 'label2')
+        label2 = value;
+    end
+end
+end
+
+function out = normalize_title_label(in)
+out = strtrim(char(in));
+if isempty(out)
+    return;
+end
+
+if strcmpi(out, 'correct_rejections')
+    out = 'Correct_rejection';
+    return;
+end
+
+out(1) = upper(out(1));
+end
+
+function save_png_and_svg(fig_handle, png_path, svg_path)
+print(fig_handle, png_path, '-dpng', '-r600');
+
+try
+    set(fig_handle, 'Renderer', 'painters');
+    print(fig_handle, svg_path, '-dsvg');
+    fprintf('Saved SVG: %s\n', svg_path);
+catch ME
+    warning('SVG export failed for %s: %s', svg_path, ME.message);
+end
+end
+
+function save_channel_time_png_and_svg(fig_handle, png_path, svg_path, ax_handle, img_handle, x_vals, y_vals, c_data, alpha_data)
+% Save PNG from the original raster image, then save SVG with only the
+% channel-time image converted to vector surface primitives.
+print(fig_handle, png_path, '-dpng', '-r600');
+
+try
+    x_edges = image_grid_edges(x_vals);
+    y_edges = image_grid_edges(y_vals);
+    [x_edge_grid, y_edge_grid] = meshgrid(x_edges, y_edges);
+
+    c_surface = pad_replicate_post(c_data);
+    a_surface = pad_replicate_post(alpha_data);
+
+    hold_state = ishold(ax_handle);
+    hold(ax_handle, 'on');
+    if isgraphics(img_handle)
+        delete(img_handle);
+    end
+
+    h_surface = surface(ax_handle, ...
+        x_edge_grid, y_edge_grid, zeros(size(x_edge_grid)), c_surface, ...
+        'EdgeColor', 'none', ...
+        'FaceColor', 'flat', ...
+        'FaceAlpha', 'flat', ...
+        'AlphaData', a_surface, ...
+        'AlphaDataMapping', 'none');
+    uistack(h_surface, 'bottom');
+    if ~hold_state
+        hold(ax_handle, 'off');
+    end
+
+    set(fig_handle, 'Renderer', 'painters');
+    print(fig_handle, svg_path, '-dsvg');
+    fprintf('Saved SVG: %s\n', svg_path);
+catch ME
+    warning('Channel-time SVG vector export failed for %s: %s', svg_path, ME.message);
+end
+end
+
+function edges = image_grid_edges(vals)
+vals = vals(:)';
+if numel(vals) < 2
+    if isempty(vals)
+        edges = [0 1];
+    else
+        edges = [vals(1) - 0.5, vals(1) + 0.5];
+    end
+    return;
+end
+
+edges = zeros(1, numel(vals) + 1);
+edges(2:end-1) = (vals(1:end-1) + vals(2:end)) / 2;
+edges(1) = vals(1) - (vals(2) - vals(1)) / 2;
+edges(end) = vals(end) + (vals(end) - vals(end-1)) / 2;
+end
+
+function out = pad_replicate_post(in)
+[nr, nc] = size(in);
+out = zeros(nr + 1, nc + 1, class(in));
+out(1:nr, 1:nc) = in;
+out(nr + 1, 1:nc) = in(nr, :);
+out(1:nr, nc + 1) = in(:, nc);
+out(nr + 1, nc + 1) = in(nr, nc);
 end
