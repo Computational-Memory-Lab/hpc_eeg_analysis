@@ -170,13 +170,22 @@ Outputs:
 
 ```matlab
 hpc_limo_channel_time_plots(input_folder, output_dir)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 ```
 
 Input:
 - one second-level folder
+- optional title overrides:
+  - `title_base`: base contrast title used to build default titles
+  - `channel_time_title`: full custom channel-time title
+  - `topoplot_title`: full custom topoplot title
+  - `lr_title`: full custom likelihood-ratio title
 
 Output:
 - channel-time and topoplot `.png` files in `output_dir`
+- channel-time and topoplot `.svg` files in `output_dir`
 
 ---
 
@@ -205,6 +214,11 @@ For organized runs, override `--output` and `--error` at submission time.
   - numeric mode: `P1`, `P2`, `CONTRAST_KEY`
 - `hpc_limo_channel_time_plots.slurm`
   - `INPUT_FOLDER`, `OUTPUT_DIR`
+  - optional title overrides:
+    - `TITLE_BASE`
+    - `CHANNEL_TIME_TITLE`
+    - `TOPOPLOT_TITLE`
+    - `LR_TITLE`
 
 ---
 

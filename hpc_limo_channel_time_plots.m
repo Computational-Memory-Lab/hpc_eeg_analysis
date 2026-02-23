@@ -1,4 +1,4 @@
-function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
+function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
 % HPC_LIMO_CHANNEL_TIME_PLOTS - Generate channel-time and topoplot figures
 %
 % Usage:
@@ -6,6 +6,7 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
 %
 % Inputs:
 %   input_folder - Path to a limo_second_level_<output_tag> folder containing
@@ -16,13 +17,16 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %   channel_time_title - Optional full custom channel-time figure title.
 %   topoplot_title     - Optional full custom topoplot figure title.
 %   lr_title           - Optional full custom likelihood-ratio figure title.
+%   topoplot_layout_type - Optional topoplot layout:
+%                        'grid'   (default): near-square grid layout
+%                        'zigzag' : staggered left-to-right zigzag line
 %
 % Outputs:
 %   - <output_dir>/<test_name>_channel_time_plot.png      Signed -log10(p) channel-time plot
 %   - <output_dir>/<test_name>_channel_time_plot.svg      Signed -log10(p) channel-time plot (SVG)
 %   - <output_dir>/<test_name>_channel_time_plot_LR.png   Likelihood ratio plot (if data exists)
-%   - <output_dir>/<test_name>_topoplots.png              Topoplot grid at multiple time points
-%   - <output_dir>/<test_name>_topoplots.svg              Topoplot grid at multiple time points (SVG)
+%   - <output_dir>/<test_name>_topoplots.png              Topoplot figure at multiple time points
+%   - <output_dir>/<test_name>_topoplots.svg              Topoplot figure at multiple time points (SVG)
 %
 % The test_name is derived from the input_folder name.
 % Example: limo_second_level_test_hits_vs_test_misses
@@ -39,11 +43,15 @@ end
 if nargin < 6 || isempty(lr_title)
     lr_title = '';
 end
+if nargin < 7 || isempty(topoplot_layout_type)
+    topoplot_layout_type = 'grid';
+end
 
 title_base = strtrim(char(title_base));
 channel_time_title = strtrim(char(channel_time_title));
 topoplot_title = strtrim(char(topoplot_title));
 lr_title = strtrim(char(lr_title));
+topoplot_layout_type = normalize_topoplot_layout_type(topoplot_layout_type);
 
 % ==================== PARSE INPUT FOLDER ====================
 [~, folder_name] = fileparts(input_folder);
@@ -70,6 +78,7 @@ fprintf('Default Step 6 titles:\n');
 fprintf('  Channel-time: %s\n', default_channel_time_title);
 fprintf('  Topoplots:    %s\n', default_topoplot_title);
 fprintf('  LR:           %s\n', default_lr_title);
+fprintf('  Topoplot layout: %s\n', topoplot_layout_type);
 
 % ==================== SETUP ====================
 if ~exist(output_dir, 'dir')
@@ -492,7 +501,7 @@ end
 output_file_topo_png = fullfile(output_dir, sprintf('%s_topoplots.png', test_name));
 output_file_topo_svg = fullfile(output_dir, sprintf('%s_topoplots.svg', test_name));
 max_latency = min(times(end), 2500);
-topoplot_step_ms = 50;
+topoplot_step_ms = 100;
 latencies = topoplot_step_ms:topoplot_step_ms:max_latency;
 
 if times(1) > 0
@@ -513,18 +522,20 @@ if isempty(abs_max_topo) || abs_max_topo == 0
     abs_max_topo = 1;
 end
 cc_topo = limo_color_images([-abs_max_topo, abs_max_topo]);
+topoplot_bg_rgb = [232 230 232] / 255;
+cc_topo = set_colormap_mid_color(cc_topo, topoplot_bg_rgb, 2);
 colorbar_limits_topo = [-abs_max_topo, abs_max_topo];
 
 num_latencies = length(latencies);
-ncols = 4;
-nrows = ceil(num_latencies / ncols);
+[topo_fig_position, topo_ax_positions, topo_cbar_position] = ...
+    compute_topoplot_layout(num_latencies, topoplot_layout_type);
 
-fig_topo = figure('Visible', 'off', 'Position', [100 50 1200 300*nrows], 'Color', 'w', 'InvertHardcopy', 'off');
-ax_handles_topo = [];
+fig_topo = figure('Visible', 'off', 'Position', topo_fig_position, 'Color', 'w', 'InvertHardcopy', 'off');
+ax_handles_topo = gobjects(1, num_latencies);
 
 for i = 1:num_latencies
-    ax_topo = subplot(nrows, ncols, i);
-    ax_handles_topo(end+1) = ax_topo;
+    ax_seed = axes('Parent', fig_topo, 'Position', topo_ax_positions(i, :));
+    axes(ax_seed);
 
     data_timepoint = signed_logp_data(:, time_indices(i));
     p_timepoint    = p_values(:, time_indices(i));
@@ -538,17 +549,25 @@ for i = 1:num_latencies
         'style', 'both', ...
         'shading', 'interp', ...
         'numcontour', 6);
+    ax_topo = gca;
+    if isgraphics(ax_seed) && ax_seed ~= ax_topo
+        delete(ax_seed);
+    end
+    set(ax_topo, 'Units', 'normalized', ...
+        'Position', topo_ax_positions(i, :), ...
+        'ActivePositionProperty', 'position', ...
+        'PositionConstraint', 'innerposition', ...
+        'Color', topoplot_bg_rgb);
+    ax_handles_topo(i) = ax_topo;
 
-    title(sprintf('%d ms', round(latencies(i))), 'FontSize', 8, 'Color', 'k');
-
-    pos = get(ax_topo, 'Position');
-    center_x = pos(1) + pos(3)/2;
-    center_y = pos(2) + pos(4)/2;
-    new_width  = pos(3) * 1.1;
-    new_height = pos(4) * 1.1;
-    new_x = center_x - new_width/2;
-    new_y = center_y - new_height/2;
-    set(ax_topo, 'Position', [new_x, new_y, new_width, new_height]);
+    text(ax_topo, 0.5, -0.12, sprintf('%d ms', round(latencies(i))), ...
+        'Units', 'normalized', ...
+        'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'top', ...
+        'FontSize', 8, ...
+        'FontWeight', 'bold', ...
+        'Color', 'k', ...
+        'Clipping', 'off');
 end
 
 colormap(fig_topo, cc_topo);
@@ -562,7 +581,7 @@ imagesc(ax_ref_topo, linspace(colorbar_limits_topo(1), colorbar_limits_topo(2), 
 set(ax_ref_topo, 'CLim', colorbar_limits_topo);
 colormap(ax_ref_topo, cc_topo);
 
-h_topo = colorbar(ax_ref_topo, 'Position', [0.92 0.1 0.03 0.8]);
+h_topo = colorbar(ax_ref_topo, 'Position', topo_cbar_position);
 tick_values_topo = [colorbar_limits_topo(1), colorbar_limits_topo(1)/2, 0, colorbar_limits_topo(2)/2, colorbar_limits_topo(2)];
 tick_labels_topo = arrayfun(@(x) sprintf('%.1f', x), tick_values_topo, 'UniformOutput', false);
 set(h_topo, 'Ticks', tick_values_topo, 'TickLabels', tick_labels_topo, 'Color', 'k', 'Box', 'on');
@@ -579,11 +598,6 @@ end
 
 sgtitle(plot_title_topo, 'FontSize', 14, 'Color', 'k', 'Interpreter', 'none');
 
-for i = 1:length(ax_handles_topo)
-    pos = get(ax_handles_topo(i), 'Position');
-    set(ax_handles_topo(i), 'Position', [pos(1), pos(2)*0.925, pos(3), pos(4)]);
-end
-
 set(fig_topo, 'PaperPositionMode', 'auto');
 set(fig_topo, 'PaperUnits', 'inches');
 set(fig_topo, 'InvertHardCopy', 'off');
@@ -591,7 +605,7 @@ set(fig_topo, 'InvertHardCopy', 'off');
 save_png_and_svg(fig_topo, output_file_topo_png, output_file_topo_svg);
 close(fig_topo);
 
-fprintf('Saved topoplot grid PNG: %s\n', output_file_topo_png);
+fprintf('Saved topoplot PNG: %s\n', output_file_topo_png);
 
 fprintf('\nAll plots completed! Saved to: %s\n', output_dir);
 
@@ -672,6 +686,123 @@ if strcmpi(out, 'correct_rejections')
 end
 
 out(1) = upper(out(1));
+end
+
+function layout_type = normalize_topoplot_layout_type(layout_value)
+layout_type = lower(strtrim(char(layout_value)));
+if isempty(layout_type)
+    layout_type = 'grid';
+    return;
+end
+
+switch layout_type
+    case {'grid', 'square', 'square_grid', 'square-grid'}
+        layout_type = 'grid';
+    case {'zigzag', 'zigzag_line', 'zigzag-line', 'staggered', 'staggered_line', 'staggered-line', 'line'}
+        layout_type = 'zigzag';
+    otherwise
+        warning('Unknown topoplot layout type "%s". Falling back to "grid".', layout_type);
+        layout_type = 'grid';
+end
+end
+
+function [fig_position, ax_positions, colorbar_position] = compute_topoplot_layout(num_plots, layout_type)
+if num_plots < 1
+    num_plots = 1;
+end
+
+plot_region = [0.04 0.12 0.84 0.74];
+
+switch layout_type
+    case 'zigzag'
+        % Compute in pixels so each topoplot is truly square on-screen.
+        % This avoids tiny circles on wide canvases and preserves 90-degree
+        % zigzag turns in rendered output (dx == dy in pixels).
+        fig_width = max(2600, 900 + 95 * num_plots);
+        fig_height = 1000;
+
+        left_px   = plot_region(1) * fig_width;
+        bottom_px = plot_region(2) * fig_height;
+        region_w_px = plot_region(3) * fig_width;
+        region_h_px = plot_region(4) * fig_height;
+
+        ax_positions = zeros(num_plots, 4);
+        if num_plots == 1
+            d_px = min(region_w_px, region_h_px) * 0.75;
+            x_center_px = left_px + region_w_px / 2;
+            y_center_px = bottom_px + region_h_px / 2;
+            ax_positions(1, :) = [ ...
+                (x_center_px - d_px/2) / fig_width, ...
+                (y_center_px - d_px/2) / fig_height, ...
+                d_px / fig_width, ...
+                d_px / fig_height];
+        else
+            near_touch_ratio = 0.98;
+            diameter_per_step = near_touch_ratio * sqrt(2);
+            step_px_by_width = region_w_px / ((num_plots - 1) + diameter_per_step);
+            step_px_by_height = region_h_px / (1 + diameter_per_step);
+            step_px = min(step_px_by_width, step_px_by_height);
+            d_px = diameter_per_step * step_px;
+            y_step_px = step_px; % true 90-degree zigzag
+
+            x_first_px = left_px + d_px / 2;
+            y_mid_px = bottom_px + region_h_px / 2;
+            y_high_px = y_mid_px + y_step_px / 2;
+            y_low_px  = y_mid_px - y_step_px / 2;
+
+            for idx = 1:num_plots
+                x_center_px = x_first_px + (idx - 1) * step_px;
+                if mod(idx, 2) == 1
+                    y_center_px = y_high_px;
+                else
+                    y_center_px = y_low_px;
+                end
+                ax_positions(idx, :) = [ ...
+                    (x_center_px - d_px/2) / fig_width, ...
+                    (y_center_px - d_px/2) / fig_height, ...
+                    d_px / fig_width, ...
+                    d_px / fig_height];
+            end
+        end
+        colorbar_position = [0.92 0.16 0.03 0.68];
+
+    otherwise
+        % Near-square grid (ncols ~= nrows) for compact overview layout.
+        ncols = ceil(sqrt(num_plots));
+        nrows = ceil(num_plots / ncols);
+        cell_pixels = 220;
+        fig_width = max(1200, 200 + ncols * cell_pixels);
+        fig_height = max(700, 200 + nrows * cell_pixels);
+
+        cell_width = plot_region(3) / ncols;
+        cell_height = plot_region(4) / nrows;
+        plot_size = min(cell_width, cell_height) * 0.90;
+
+        ax_positions = zeros(num_plots, 4);
+        for idx = 1:num_plots
+            row = ceil(idx / ncols);
+            col = mod(idx - 1, ncols) + 1;
+            x_center = plot_region(1) + (col - 0.5) * cell_width;
+            y_center = plot_region(2) + plot_region(4) - (row - 0.5) * cell_height;
+            ax_positions(idx, :) = [x_center - plot_size/2, y_center - plot_size/2, plot_size, plot_size];
+        end
+        colorbar_position = [0.92 0.1 0.03 0.8];
+end
+
+fig_position = [100 50 fig_width fig_height];
+end
+
+function cmap_out = set_colormap_mid_color(cmap_in, mid_rgb, half_width)
+cmap_out = cmap_in;
+if isempty(cmap_in)
+    return;
+end
+
+n = size(cmap_in, 1);
+mid = round((n + 1) / 2);
+idx_start = max(1, mid - half_width);
+idx_end = min(n, mid + half_width);
+cmap_out(idx_start:idx_end, :) = repmat(mid_rgb, idx_end - idx_start + 1, 1);
 end
 
 function save_png_and_svg(fig_handle, png_path, svg_path)
