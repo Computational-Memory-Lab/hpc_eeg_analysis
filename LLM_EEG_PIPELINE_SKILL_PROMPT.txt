@@ -8,6 +8,7 @@ Context:
   - hpc_raw_to_set.m / .slurm
   - hpc_set_to_interpol.m / .slurm
   - hpc_interpol_to_epoch.m / .slurm
+  - hpc_epoch_to_erp_plot.m / .slurm
   - hpc_limo_first_level.m / .slurm
   - hpc_limo_second_level.m / .slurm
   - hpc_limo_channel_time_plots.m / .slurm
@@ -57,13 +58,20 @@ REQUIRED EEG SKILL BEHAVIOR
 A) Ask for required inputs (when missing)
 The Skill should make the agent ask targeted questions, including:
 - Input folder path
-- Desired endpoint/result (e.g., preprocessing only, through epoch, first-level LIMO, second-level + plots)
+- Desired endpoint/result (e.g., preprocessing only, through epoch, epoch ERP plots, first-level LIMO, second-level + plots)
+- If epoch ERP plots requested: trial_type labels to plot (e.g., Study_hits,Study_misses)
+- If epoch ERP plots requested: channels to average (default 21) and output folder/title overrides
 - If second-level: condition labels to compare (e.g., Study_hits vs Study_misses)
 - If plots requested: output plot directory
 - If plots requested: whether to keep default Step 6 titles or use custom titles
   - defaults should be shown before asking:
     - `<label1> vs <label2> Channel-Time Plot (TFCE-corrected)`
     - `<label1> vs <label2> Topoplots (TFCE-corrected)`
+- If plots requested: topoplot layout preference
+  - options:
+    - `grid` (default): near-square arrangement
+    - `zigzag`: staggered left-to-right zigzag line
+    - `line`: single horizontal row
 - Whether to use defaults or custom values for:
   - VOLTAGE_DIFF (default 20)
   - VOLTAGE_ABS (default 1000)
@@ -76,7 +84,8 @@ Use robust detection rules like:
 - Stage 1 input (raw): folder contains .raw and matching .log + .eeglog
 - Stage 2 input (behavioral set): folder contains processed_*.set (typically in initial_set/behavioral_set)
 - Stage 3 input (interpol): folder contains preprocessed_full_*.set (typically in interpol/)
-- Stage 4 input (epoch): folder contains *_epoch.set (typically in epoch/)
+- Stage 4A output candidate (ERP plots): folder contains grand_average_erp_*.mat
+- Stage 4 branching input (epoch): folder contains *_epoch.set (typically in epoch/)
 - Stage 5 input (limo first level): folder contains PairAsso_Epoched.study and derivatives/
 - Stage 6 input (limo second level): folder contains LIMO.mat and paired_samples_ttest_parameter_*.mat
 
@@ -84,7 +93,8 @@ C) Determine end stage from user intent
 Map typical requests:
 - “up to preprocessing” -> end at Stage 2
 - “epoch this dataset” -> end at Stage 3
-- “run first-level LIMO” -> end at Stage 4
+- “plot grand-average ERP by trial_type” -> end at Stage 4A
+- “run first-level LIMO” -> end at Stage 4B
 - “run second-level LIMO on A vs B” -> end at Stage 5
 - “run and graph second-level A vs B” -> end at Stage 6
 
@@ -93,9 +103,15 @@ Stages:
 1. raw_to_set: hpc_raw_to_set(.slurm)
 2. set_to_interpol: hpc_set_to_interpol(.slurm)
 3. interpol_to_epoch: hpc_interpol_to_epoch(.slurm)
-4. limo_first_level: hpc_limo_first_level(.slurm)
+4A. epoch_to_erp_plot: hpc_epoch_to_erp_plot(.slurm)
+4B. limo_first_level: hpc_limo_first_level(.slurm)
 5. limo_second_level: hpc_limo_second_level(.slurm)
 6. channel_time_plots: hpc_limo_channel_time_plots(.slurm)
+
+Branch rule:
+- Stage 4A is a branch from epoch outputs (Stage 3).
+- Stage 4B is the LIMO branch from epoch outputs (Stage 3).
+- Stages 5-6 require Stage 4B.
 
 E) Support label-based second-level contrasts
 - Prefer label mode in hpc_limo_second_level (C1_LABEL/C2_LABEL), not raw numeric indices.
@@ -136,6 +152,9 @@ Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
   - INPUT_FOLDER, VOLTAGE_DIFF, VOLTAGE_ABS, EPOCH_TRIGGERS_CSV, EPOCH_GROUP_SPEC
   - optional SUBJECT_ID (single-subject execution)
   - optional SUBJECTS_FILE + SLURM_ARRAY_TASK_ID (array execution)
+- hpc_epoch_to_erp_plot.slurm
+  - INPUT_FOLDER, TRIAL_TYPES_CSV
+  - optional CHANNELS_CSV, OUTPUT_DIR, FIGURE_TITLE
 - hpc_limo_first_level.slurm
   - INPUT_FOLDER, CONDITION_ORDER
 - hpc_limo_second_level.slurm
@@ -144,9 +163,11 @@ Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
 - hpc_limo_channel_time_plots.slurm
   - INPUT_FOLDER, OUTPUT_DIR
   - optional TITLE_BASE, CHANNEL_TIME_TITLE, TOPOPLOT_TITLE, LR_TITLE
+  - optional TOPOPLOT_LAYOUT (grid|zigzag|line)
 
 Also include use of submit_pipeline.sh where appropriate, but emphasize that the Skill must support partial pipelines and not force full runs.
 For full runs from raw input, prefer Stage 1-3 as SLURM arrays (subject-level parallelism).
+When relevant, note that submit_pipeline.sh can optionally submit the Stage 4A ERP branch after Stage 3.
 When submitting jobs, prefer `--output` / `--error` paths under each stage output folder's `logs/` subdirectory instead of a single global logs folder.
 For array jobs, use `%A_%a` in log filenames.
 

@@ -5,6 +5,7 @@ Scripts live in `/home/devon7y/scratch/devon7y/hpc_eeg_analysis/`.
 This pipeline now supports general experiments by using:
 - a precomputed `event_label` column in session logs
 - configurable epoch trigger logic
+- an optional post-epoch ERP plotting branch
 - condition-name driven second-level contrasts
 - subject-scoped execution for Stages 1-3 (for SLURM arrays)
 
@@ -27,7 +28,11 @@ raw_input_folder (contains *.raw, session *.log, *.eeglog)
       output: interpol_folder/epoch/
 
 .../epoch/
-  -> hpc_limo_first_level(epoch_folder, condition_order)
+  -> (Branch A) hpc_epoch_to_erp_plot(epoch_folder, trial_type_values, ...)
+      output: epoch_folder/erp_plots/
+
+.../epoch/
+  -> (Branch B) hpc_limo_first_level(epoch_folder, condition_order)
       output: epoch_folder/limo_first_level/
 
 .../limo_first_level/
@@ -131,7 +136,29 @@ Behavior:
 Output:
 - `interpol/epoch/<ID>_epoch.set`
 
-### 4) LIMO First Level
+### 4A) Epoch -> ERP Grand Average Plot (Branch)
+
+```matlab
+hpc_epoch_to_erp_plot(input_folder, trial_type_values)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title)
+```
+
+Inputs:
+- `input_folder`: epoch folder containing `*_epoch.set`
+- `trial_type_values`: labels to plot, accepts CSV/string-array/cell
+  - examples: `{'Study_hits','Study_misses'}` or `'Study_hits,Study_misses'`
+- optional `channels`: channel indices for averaging (default `21`)
+- optional `output_dir`: default `epoch/erp_plots`
+- optional `figure_title`: full custom title
+
+Outputs:
+- `epoch/erp_plots/grand_average_erp_<trial_types>.png`
+- `epoch/erp_plots/grand_average_erp_<trial_types>.svg`
+- `epoch/erp_plots/grand_average_erp_<trial_types>.mat`
+
+### 4B) LIMO First Level
 
 ```matlab
 hpc_limo_first_level(input_folder)
@@ -173,6 +200,7 @@ hpc_limo_channel_time_plots(input_folder, output_dir)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
 ```
 
 Input:
@@ -182,6 +210,11 @@ Input:
   - `channel_time_title`: full custom channel-time title
   - `topoplot_title`: full custom topoplot title
   - `lr_title`: full custom likelihood-ratio title
+- optional topoplot layout override:
+  - `topoplot_layout_type`: `'grid'` (default), `'zigzag'`, or `'line'`
+  - `grid`: near-square arrangement
+  - `zigzag`: staggered left-to-right zigzag line
+  - `line`: single horizontal row
 
 Output:
 - channel-time and topoplot `.png` files in `output_dir`
@@ -207,6 +240,9 @@ For organized runs, override `--output` and `--error` at submission time.
   - `INPUT_FOLDER`, `VOLTAGE_DIFF`, `VOLTAGE_ABS`, `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`
   - optional subject scope: `SUBJECT_ID`
   - array mode: `SUBJECTS_FILE` + `--array`
+- `hpc_epoch_to_erp_plot.slurm`
+  - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`
+  - optional: `CHANNELS_CSV`, `OUTPUT_DIR`, `FIGURE_TITLE`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
 - `hpc_limo_second_level.slurm`
@@ -219,6 +255,8 @@ For organized runs, override `--output` and `--error` at submission time.
     - `CHANNEL_TIME_TITLE`
     - `TOPOPLOT_TITLE`
     - `LR_TITLE`
+  - optional topoplot layout:
+    - `TOPOPLOT_LAYOUT` = `grid` (default), `zigzag`, or `line`
 
 ---
 
@@ -233,6 +271,12 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 `submit_pipeline.sh` now supports:
 - configurable epoching (`EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
 - optional explicit `CONDITION_ORDER`
+- optional Stage 4A ERP branch:
+  - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)
+  - `TRIAL_TYPES_CSV`
+  - `ERP_CHANNELS_CSV`
+  - `ERP_OUTPUT_DIR` (empty => `epoch/erp_plots`)
+  - `ERP_FIGURE_TITLE`
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)
 - subject-manifest generation from `RAW_INPUT/*.raw`
 - Stage 1-3 submission as SLURM arrays (`--array`) with throttles:
@@ -243,9 +287,15 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
   - Stage 1 logs: `<initial_set>/logs/raw_to_set/`
   - Stage 2 logs: `<interpol>/logs/set_to_interpol/`
   - Stage 3 logs: `<epoch>/logs/interpol_to_epoch/`
-  - Stage 4 logs: `<limo_first_level>/logs/limo_first_level/`
+  - Stage 4A logs (when enabled): `<erp_plots>/logs/epoch_to_erp_plot/`
+  - Stage 4B logs: `<limo_first_level>/logs/limo_first_level/`
   - Stage 5 logs: `<limo_second_level_<key>>/logs/limo_second_level/`
   - Stage 6 logs: `<PLOTS>/logs/channel_time_plots/<key>/`
+
+Note:
+- `submit_pipeline.sh` always runs the LIMO branch after Stage 3.
+- It can also run the ERP branch in parallel when `RUN_EPOCH_ERP_BRANCH=1`.
+- You can still run only the ERP branch directly with `hpc_epoch_to_erp_plot.slurm`.
 
 Monitor jobs:
 

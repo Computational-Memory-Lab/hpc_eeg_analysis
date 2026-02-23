@@ -2,7 +2,8 @@
 # submit_pipeline.sh
 # Submits the full EEG analysis pipeline as chained SLURM jobs.
 # Stages 1-3 are submitted as subject-level SLURM arrays.
-# Edit RAW_INPUT, PLOTS, epoch logic, condition order, and contrasts below.
+# Optionally submits an epoch->ERP branch after Stage 3.
+# Edit RAW_INPUT, PLOTS, epoch logic, ERP settings, condition order, and contrasts below.
 
 set -euo pipefail
 
@@ -30,6 +31,17 @@ EPOCH_TRIGGERS_CSV="11,21,22"
 EPOCH_GROUP_SPEC="SME:11;Test_Intact:21;Test_Recombined:22"
 CONDITION_ORDER=""  # optional: comma-separated labels; empty = infer from trial_type
 
+# ============================================================
+# OPTIONAL ERP BRANCH SETTINGS (Stage 4A)
+# ============================================================
+# 1 = submit hpc_epoch_to_erp_plot after Stage 3
+# 0 = skip ERP branch and run only the LIMO branch
+RUN_EPOCH_ERP_BRANCH="0"
+TRIAL_TYPES_CSV="Study_hits,Study_misses"
+ERP_CHANNELS_CSV="21"
+ERP_OUTPUT_DIR=""     # empty => <EPOCH>/erp_plots
+ERP_FIGURE_TITLE=""   # empty => default title from hpc_epoch_to_erp_plot.m
+
 # Contrast entries:
 #   key|condition_label_1|condition_label_2|display_title
 COMPARISONS=(
@@ -47,6 +59,9 @@ BEHAVIORAL_SET="${INITIAL_SET}/behavioral_set"
 INTERPOL="${BEHAVIORAL_SET}/interpol"
 EPOCH="${INTERPOL}/epoch"
 FIRST_LEVEL="${EPOCH}/limo_first_level"
+if [[ -z "${ERP_OUTPUT_DIR}" ]]; then
+  ERP_OUTPUT_DIR="${EPOCH}/erp_plots"
+fi
 MANIFEST_DIR="${PARENT_DIR}/pipeline_manifests"
 mkdir -p "${MANIFEST_DIR}"
 
@@ -54,23 +69,38 @@ mkdir -p "${MANIFEST_DIR}"
 LOG_STAGE1_DIR="${INITIAL_SET}/logs/raw_to_set"
 LOG_STAGE2_DIR="${INTERPOL}/logs/set_to_interpol"
 LOG_STAGE3_DIR="${EPOCH}/logs/interpol_to_epoch"
-LOG_STAGE4_DIR="${FIRST_LEVEL}/logs/limo_first_level"
+LOG_STAGE4A_DIR="${ERP_OUTPUT_DIR}/logs/epoch_to_erp_plot"
+LOG_STAGE4B_DIR="${FIRST_LEVEL}/logs/limo_first_level"
 LOG_PLOTS_DIR="${PLOTS}/logs/channel_time_plots"
 
-mkdir -p "${LOG_STAGE1_DIR}" "${LOG_STAGE2_DIR}" "${LOG_STAGE3_DIR}" "${LOG_STAGE4_DIR}" "${LOG_PLOTS_DIR}"
+mkdir -p "${LOG_STAGE1_DIR}" "${LOG_STAGE2_DIR}" "${LOG_STAGE3_DIR}" "${LOG_STAGE4B_DIR}" "${LOG_PLOTS_DIR}"
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  mkdir -p "${LOG_STAGE4A_DIR}"
+fi
+
+if [[ "${RUN_EPOCH_ERP_BRANCH}" != "0" && "${RUN_EPOCH_ERP_BRANCH}" != "1" ]]; then
+  echo "ERROR: RUN_EPOCH_ERP_BRANCH must be 0 or 1, got: ${RUN_EPOCH_ERP_BRANCH}" >&2
+  exit 1
+fi
 
 if [[ ! -d "${RAW_INPUT}" ]]; then
   echo "ERROR: RAW_INPUT folder does not exist: ${RAW_INPUT}" >&2
   exit 1
 fi
 
-for REQUIRED_SCRIPT in \
-  "hpc_raw_to_set.slurm" \
-  "hpc_set_to_interpol.slurm" \
-  "hpc_interpol_to_epoch.slurm" \
-  "hpc_limo_first_level.slurm" \
-  "hpc_limo_second_level.slurm" \
-  "hpc_limo_channel_time_plots.slurm"; do
+REQUIRED_SCRIPTS=(
+  "hpc_raw_to_set.slurm"
+  "hpc_set_to_interpol.slurm"
+  "hpc_interpol_to_epoch.slurm"
+  "hpc_limo_first_level.slurm"
+  "hpc_limo_second_level.slurm"
+  "hpc_limo_channel_time_plots.slurm"
+)
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  REQUIRED_SCRIPTS+=("hpc_epoch_to_erp_plot.slurm")
+fi
+
+for REQUIRED_SCRIPT in "${REQUIRED_SCRIPTS[@]}"; do
   if [[ ! -f "${SCRIPTS}/${REQUIRED_SCRIPT}" ]]; then
     echo "ERROR: Missing SLURM script: ${SCRIPTS}/${REQUIRED_SCRIPT}" >&2
     exit 1
@@ -157,18 +187,32 @@ JOB3=$(sbatch --parsable \
 echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
 
 # ============================================================
-# STAGE 4: epoch -> limo first level
+# STAGE 4A (optional): epoch -> ERP grand average plot
 # ============================================================
-JOB4=$(sbatch --parsable \
-  --dependency=afterok:${JOB3} \
-  --output="${LOG_STAGE4_DIR}/%x_%j.out" \
-  --error="${LOG_STAGE4_DIR}/%x_%j.err" \
-  --export=ALL,INPUT_FOLDER="${EPOCH}",CONDITION_ORDER="${CONDITION_ORDER}" \
-  "${SCRIPTS}/hpc_limo_first_level.slurm")
-echo "Submitted job4 (limo_first_level):            ${JOB4}"
+JOB4A=""
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  JOB4A=$(sbatch --parsable \
+    --dependency=afterok:${JOB3} \
+    --output="${LOG_STAGE4A_DIR}/%x_%j.out" \
+    --error="${LOG_STAGE4A_DIR}/%x_%j.err" \
+    --export=ALL,INPUT_FOLDER="${EPOCH}",TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV}",CHANNELS_CSV="${ERP_CHANNELS_CSV}",OUTPUT_DIR="${ERP_OUTPUT_DIR}",FIGURE_TITLE="${ERP_FIGURE_TITLE}" \
+    "${SCRIPTS}/hpc_epoch_to_erp_plot.slurm")
+  echo "Submitted job4A (epoch_to_erp_plot):         ${JOB4A}"
+fi
 
 # ============================================================
-# STAGE 5: second-level contrasts (parallel after job4)
+# STAGE 4B: epoch -> limo first level
+# ============================================================
+JOB4B=$(sbatch --parsable \
+  --dependency=afterok:${JOB3} \
+  --output="${LOG_STAGE4B_DIR}/%x_%j.out" \
+  --error="${LOG_STAGE4B_DIR}/%x_%j.err" \
+  --export=ALL,INPUT_FOLDER="${EPOCH}",CONDITION_ORDER="${CONDITION_ORDER}" \
+  "${SCRIPTS}/hpc_limo_first_level.slurm")
+echo "Submitted job4B (limo_first_level):          ${JOB4B}"
+
+# ============================================================
+# STAGE 5: second-level contrasts (parallel after job4B)
 # ============================================================
 declare -A JOB5
 for ITEM in "${COMPARISONS[@]}"; do
@@ -178,7 +222,7 @@ for ITEM in "${COMPARISONS[@]}"; do
   mkdir -p "${LOG_STAGE5_DIR}"
 
   JOB5["${KEY}"]=$(sbatch --parsable \
-    --dependency=afterok:${JOB4} \
+    --dependency=afterok:${JOB4B} \
     --job-name="hpc_second_level_${KEY}" \
     --output="${LOG_STAGE5_DIR}/%x_%j.out" \
     --error="${LOG_STAGE5_DIR}/%x_%j.err" \
@@ -211,6 +255,7 @@ done
 echo ""
 echo "All jobs submitted. Monitor with: squeue -u \$USER"
 echo "Subject manifest: ${SUBJECTS_FILE}"
+echo "ERP branch enabled: ${RUN_EPOCH_ERP_BRANCH}"
 echo "Array throttles:"
 echo "  stage1: ${ARRAY_THROTTLE_STAGE1}"
 echo "  stage2: ${ARRAY_THROTTLE_STAGE2}"
@@ -219,7 +264,10 @@ echo "Log folders:"
 echo "  stage1: ${LOG_STAGE1_DIR}"
 echo "  stage2: ${LOG_STAGE2_DIR}"
 echo "  stage3: ${LOG_STAGE3_DIR}"
-echo "  stage4: ${LOG_STAGE4_DIR}"
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  echo "  stage4A: ${LOG_STAGE4A_DIR}"
+fi
+echo "  stage4B: ${LOG_STAGE4B_DIR}"
 echo "  stage5: ${FIRST_LEVEL}/limo_second_level_<key>/logs/limo_second_level"
 echo "  stage6: ${LOG_PLOTS_DIR}"
 echo "Derived folders:"
@@ -227,4 +275,7 @@ echo "  initial_set:    ${INITIAL_SET}"
 echo "  behavioral_set: ${BEHAVIORAL_SET}"
 echo "  interpol:       ${INTERPOL}"
 echo "  epoch:          ${EPOCH}"
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  echo "  erp_plots:      ${ERP_OUTPUT_DIR}"
+fi
 echo "  first_level:    ${FIRST_LEVEL}"
