@@ -9,7 +9,7 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %
 % Inputs:
 %   input_folder      - Path to epoch folder containing *_epoch.set files.
-%   trial_type_values - Trial type labels to plot. Accepts CSV, string array,
+%   trial_type_values - Trial type labels to plot. Accepts CSV/semicolon list, string array,
 %                       or cell array (e.g., {'Study_hits','Study_misses'}).
 %   channels          - Optional channel indices (default: 21).
 %                       Accepts numeric vector or CSV string (e.g., '21,22').
@@ -18,7 +18,7 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %
 % Outputs:
 %   - <output_dir>/grand_average_erp_<trial_types>.png
-%   - <output_dir>/grand_average_erp_<trial_types>.svg
+%   - <output_dir>/grand_average_erp_<trial_types>.svg (best effort on headless HPC)
 %   - <output_dir>/grand_average_erp_<trial_types>.mat
 
 if nargin < 2 || isempty(trial_type_values)
@@ -179,7 +179,7 @@ output_svg = fullfile(output_dir, sprintf('grand_average_erp_%s.svg', trial_type
 output_mat = fullfile(output_dir, sprintf('grand_average_erp_%s.mat', trial_type_tag));
 
 exportgraphics(fig, output_png, 'Resolution', 300);
-exportgraphics(fig, output_svg, 'ContentType', 'vector');
+svg_saved = save_svg_with_fallback(fig, output_svg);
 close(fig);
 
 save(output_mat, 'trial_type_values', 'channels_in_use', 'time_vector', ...
@@ -194,7 +194,11 @@ for c = 1:n_conditions
         trial_type_values{c}, participants_per_condition(c));
 end
 fprintf('Saved PNG: %s\n', output_png);
-fprintf('Saved SVG: %s\n', output_svg);
+if svg_saved
+    fprintf('Saved SVG: %s\n', output_svg);
+else
+    fprintf('SVG export unavailable in this MATLAB/headless config; skipped SVG.\n');
+end
 fprintf('Saved MAT: %s\n', output_mat);
 fprintf('==============================================\n\n');
 
@@ -208,7 +212,11 @@ if nargout > 0
     results.participants_per_condition = participants_per_condition;
     results.subject_ids = subject_ids;
     results.output_png = output_png;
-    results.output_svg = output_svg;
+    if svg_saved
+        results.output_svg = output_svg;
+    else
+        results.output_svg = '';
+    end
     results.output_mat = output_mat;
 end
 
@@ -216,7 +224,12 @@ end
 
 function labels = parse_trial_type_values(value)
 if ischar(value) || (isstring(value) && isscalar(value))
-    parts = strsplit(char(value), ',');
+    raw = strtrim(char(value));
+    if contains(raw, ';')
+        parts = strsplit(raw, ';');
+    else
+        parts = strsplit(raw, ',');
+    end
     labels = cellfun(@strtrim, parts, 'UniformOutput', false);
 elseif isstring(value)
     labels = arrayfun(@(x) strtrim(char(x)), value(:)', 'UniformOutput', false);
@@ -233,6 +246,33 @@ labels = labels(~cellfun(@isempty, labels));
 labels = unique(labels, 'stable');
 if isempty(labels)
     error('No valid trial_type labels provided.');
+end
+end
+
+function ok = save_svg_with_fallback(fig, output_svg)
+ok = false;
+
+try
+    exportgraphics(fig, output_svg, 'ContentType', 'vector');
+    ok = true;
+    return;
+catch ME
+    warning('exportgraphics SVG failed: %s', ME.message);
+end
+
+try
+    print(fig, output_svg, '-dsvg');
+    ok = true;
+    return;
+catch ME
+    warning('print -dsvg failed: %s', ME.message);
+end
+
+try
+    saveas(fig, output_svg);
+    ok = exist(output_svg, 'file') == 2;
+catch ME
+    warning('saveas SVG failed: %s', ME.message);
 end
 end
 

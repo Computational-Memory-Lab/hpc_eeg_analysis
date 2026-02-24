@@ -147,8 +147,9 @@ hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, fig
 
 Inputs:
 - `input_folder`: epoch folder containing `*_epoch.set`
-- `trial_type_values`: labels to plot, accepts CSV/string-array/cell
-  - examples: `{'Study_hits','Study_misses'}` or `'Study_hits,Study_misses'`
+- `trial_type_values`: labels to plot, accepts comma/semicolon list, string-array, or cell
+  - examples: `{'Study_hits','Study_misses'}`, `'Study_hits,Study_misses'`, or `'Study_hits;Study_misses'`
+- for `sbatch --export`, prefer semicolon separator (`;`) because commas also separate env vars
 - optional `channels`: channel indices for averaging (default `21`)
 - optional `output_dir`: default `epoch/erp_plots`
 - optional `figure_title`: full custom title
@@ -242,6 +243,7 @@ For organized runs, override `--output` and `--error` at submission time.
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_epoch_to_erp_plot.slurm`
   - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`
+    - `TRIAL_TYPES_CSV` supports comma/semicolon separators (semicolon preferred for `sbatch --export`)
   - optional: `CHANNELS_CSV`, `OUTPUT_DIR`, `FIGURE_TITLE`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
@@ -273,7 +275,7 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 - optional explicit `CONDITION_ORDER`
 - optional Stage 4A ERP branch:
   - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)
-  - `TRIAL_TYPES_CSV`
+  - `TRIAL_TYPES_CSV` (comma/semicolon list; semicolon preferred)
   - `ERP_CHANNELS_CSV`
   - `ERP_OUTPUT_DIR` (empty => `epoch/erp_plots`)
   - `ERP_FIGURE_TITLE`

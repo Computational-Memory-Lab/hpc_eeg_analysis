@@ -12,13 +12,16 @@
 
 # ============================================================
 # INPUT_FOLDER: epoch/ folder produced by hpc_interpol_to_epoch
-# TRIAL_TYPES_CSV: comma-separated trial_type labels to plot
+# TRIAL_TYPES_CSV: trial_type labels to plot.
+#                  Supports comma or semicolon separators.
+#                  For sbatch --export, semicolon is safer because commas are
+#                  also used as env separators.
 # CHANNELS_CSV: optional comma-separated channel indices (default: 21)
 # OUTPUT_DIR: output folder for ERP plot files (default: INPUT_FOLDER/erp_plots)
 # FIGURE_TITLE: optional full custom figure title
 # ============================================================
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch}"
-TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV:-Study_hits,Study_misses}"
+TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV:-Study_hits;Study_misses}"
 CHANNELS_CSV="${CHANNELS_CSV:-21}"
 OUTPUT_DIR="${OUTPUT_DIR:-${INPUT_FOLDER}/erp_plots}"
 FIGURE_TITLE="${FIGURE_TITLE:-}"

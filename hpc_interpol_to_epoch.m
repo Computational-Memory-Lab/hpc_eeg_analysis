@@ -45,6 +45,15 @@ end
 
 epoch_triggers = normalize_trigger_list(epoch_triggers);
 group_def = parse_group_spec(group_spec);
+condition_names = {'Study_hits', 'Study_misses', 'Test_hits', 'Test_misses', 'Correct_rejections', 'False_alarms'};
+
+% Create output folder and summary file path.
+epoch_folder = fullfile(input_folder, 'epoch');
+if ~exist(epoch_folder, 'dir')
+    mkdir(epoch_folder);
+end
+summary_txt_file = fullfile(epoch_folder, ...
+    sprintf('Processing_Summary_%s.txt', datestr(now, 'yyyy-mm-dd_HH-MM-SS')));
 
 fprintf('\n==============================================\n');
 fprintf('  HPC INTERPOL -> EPOCH\n');
@@ -110,17 +119,13 @@ if ~isempty(subject_filter)
     fprintf('Subject filter: %d\n', subject_filter);
 end
 
-% Create output directory
-epoch_folder = fullfile(input_folder, 'epoch');
-if ~exist(epoch_folder, 'dir')
-    mkdir(epoch_folder);
-end
-
 % Processing settings
 max_rejected_trials_per_group = 56;
-processed_count = 0;
-skipped_count = 0;
-excluded_subjects = {};
+
+% Legacy-compatible summary containers (replaces old Processing_Summary_*.mat content).
+stats = initialize_epoch_stats(length(file_info), voltage_diff_threshold, ...
+    voltage_abs_threshold, max_rejected_trials_per_group, condition_names);
+results = initialize_epoch_results(length(file_info), condition_names);
 
 for file_idx = 1:length(file_info)
     current_file = file_info(file_idx);
@@ -128,13 +133,15 @@ for file_idx = 1:length(file_info)
 
     output_filename = sprintf('%d_epoch.set', s);
     output_filepath = fullfile(epoch_folder, output_filename);
+    results.subject_id{file_idx} = sprintf('%d', s);
 
     fprintf('\n----------------------------------------------\n');
     fprintf('Subject %d (%d/%d)\n', s, file_idx, length(file_info));
 
     if exist(output_filepath, 'file')
         fprintf('Output already exists, skipping: %s\n', output_filename);
-        skipped_count = skipped_count + 1;
+        results.skipped(file_idx) = true;
+        results.processed(file_idx) = true;
         continue;
     end
 
@@ -153,14 +160,16 @@ for file_idx = 1:length(file_info)
     EEG = pop_epoch(EEG, epoch_triggers, [-0.1 1.5], ...
         'newname', sprintf('Subject %d - all epoched', s), 'epochinfo', 'yes');
     EEG = pop_rmbase(EEG, [-100 0]);
+    results.original_trials(file_idx) = EEG.trials;
     fprintf('Epoched %d trials\n', EEG.trials);
 
     % STEP 2: set trial_type directly from event_label
     [EEG, cond_counts] = assign_trial_type_from_event_label(EEG, epoch_triggers);
-    condition_names = sort(cond_counts.keys);
+    subject_condition_original = condition_struct_from_map(cond_counts, condition_names);
     fprintf('Condition counts (pre-rejection):\n');
     for c = 1:numel(condition_names)
-        fprintf('  %-30s %d\n', condition_names{c}, cond_counts(condition_names{c}));
+        cond_name = condition_names{c};
+        fprintf('  %-30s %d\n', cond_name, subject_condition_original.(cond_name));
     end
 
     % STEP 3: assign epochs to artifact groups
@@ -171,6 +180,10 @@ for file_idx = 1:length(file_info)
     exclude_subject = false;
     exclusion_reason = '';
     all_channels = 1:EEG.nbchan;
+    subject_stats = struct('condition1_total', 0, 'condition2_total', 0, ...
+        'SME_original', 0, 'SME_removed', 0, 'SME_final', 0, ...
+        'Test_Intact_original', 0, 'Test_Intact_removed', 0, 'Test_Intact_final', 0, ...
+        'Test_Recombined_original', 0, 'Test_Recombined_removed', 0, 'Test_Recombined_final', 0);
 
     for g = 1:size(group_def, 1)
         group_name = group_def{g, 1};
@@ -181,25 +194,56 @@ for file_idx = 1:length(file_info)
             continue;
         end
 
+        group_original_trials = numel(group_trial_indices);
+        if strcmp(group_name, 'SME')
+            subject_stats.SME_original = group_original_trials;
+        elseif strcmp(group_name, 'Test_Intact')
+            subject_stats.Test_Intact_original = group_original_trials;
+        elseif strcmp(group_name, 'Test_Recombined')
+            subject_stats.Test_Recombined_original = group_original_trials;
+        end
+
         EEG_group = pop_select(EEG, 'trial', group_trial_indices);
         [~, bad_trials_relative, cond1_bad, cond2_bad] = get_bad_trials_v2(EEG_group, ...
             voltage_diff_threshold, voltage_abs_threshold, all_channels);
         fprintf('  Bad trials in %s: %d (diff=%d, abs=%d)\n', ...
             group_name, numel(bad_trials_relative), numel(cond1_bad), numel(cond2_bad));
 
+        subject_stats.condition1_total = subject_stats.condition1_total + numel(cond1_bad);
+        subject_stats.condition2_total = subject_stats.condition2_total + numel(cond2_bad);
+
         if numel(bad_trials_relative) > max_rejected_trials_per_group
             exclude_subject = true;
-            exclusion_reason = sprintf('Too many trials rejected in %s (%d > %d)', ...
+            exclusion_reason = sprintf('Too many trials rejected in %s group (%d > %d)', ...
                 group_name, numel(bad_trials_relative), max_rejected_trials_per_group);
+        end
+
+        if strcmp(group_name, 'SME')
+            subject_stats.SME_removed = numel(bad_trials_relative);
+        elseif strcmp(group_name, 'Test_Intact')
+            subject_stats.Test_Intact_removed = numel(bad_trials_relative);
+        elseif strcmp(group_name, 'Test_Recombined')
+            subject_stats.Test_Recombined_removed = numel(bad_trials_relative);
         end
 
         bad_trials_absolute = group_trial_indices(bad_trials_relative);
         all_bad_trials_absolute = [all_bad_trials_absolute(:); bad_trials_absolute(:)]; %#ok<AGROW>
     end
 
+    for c = 1:numel(condition_names)
+        cond_name = condition_names{c};
+        results.(['cond_orig_' cond_name])(file_idx) = subject_condition_original.(cond_name);
+    end
+
     if exclude_subject
-        excluded_subjects{end+1} = sprintf('%d (%s)', s, exclusion_reason); %#ok<AGROW>
+        results.excluded(file_idx) = true;
+        results.exclusion_reason{file_idx} = sprintf('Subject %d: %s', s, exclusion_reason);
         fprintf('EXCLUDED subject %d: %s\n', s, exclusion_reason);
+        for c = 1:numel(condition_names)
+            cond_name = condition_names{c};
+            results.(['cond_final_' cond_name])(file_idx) = 0;
+            results.(['cond_removed_' cond_name])(file_idx) = subject_condition_original.(cond_name);
+        end
         continue;
     end
 
@@ -211,30 +255,398 @@ for file_idx = 1:length(file_info)
         EEG = pop_select(EEG, 'notrial', final_bad_trials);
     end
 
+    [EEG, cond_counts_final] = assign_trial_type_from_event_label(EEG, epoch_triggers);
+    subject_condition_final = condition_struct_from_map(cond_counts_final, condition_names);
+    for c = 1:numel(condition_names)
+        cond_name = condition_names{c};
+        results.(['cond_final_' cond_name])(file_idx) = subject_condition_final.(cond_name);
+        results.(['cond_removed_' cond_name])(file_idx) = ...
+            subject_condition_original.(cond_name) - subject_condition_final.(cond_name);
+    end
+
+    subject_stats.SME_final = max(subject_stats.SME_original - subject_stats.SME_removed, 0);
+    subject_stats.Test_Intact_final = max(subject_stats.Test_Intact_original - subject_stats.Test_Intact_removed, 0);
+    subject_stats.Test_Recombined_final = max(subject_stats.Test_Recombined_original - subject_stats.Test_Recombined_removed, 0);
+
+    results.final_trials(file_idx) = EEG.trials;
+    results.removed_trials(file_idx) = numel(final_bad_trials);
+    results.condition1_removals(file_idx) = subject_stats.condition1_total;
+    results.condition2_removals(file_idx) = subject_stats.condition2_total;
+    results.SME_original(file_idx) = subject_stats.SME_original;
+    results.SME_removals(file_idx) = subject_stats.SME_removed;
+    results.SME_final(file_idx) = subject_stats.SME_final;
+    results.Test_Intact_original(file_idx) = subject_stats.Test_Intact_original;
+    results.Test_Intact_removals(file_idx) = subject_stats.Test_Intact_removed;
+    results.Test_Intact_final(file_idx) = subject_stats.Test_Intact_final;
+    results.Test_Recombined_original(file_idx) = subject_stats.Test_Recombined_original;
+    results.Test_Recombined_removals(file_idx) = subject_stats.Test_Recombined_removed;
+    results.Test_Recombined_final(file_idx) = subject_stats.Test_Recombined_final;
+
     EEG = eeg_checkset(EEG, 'eventconsistency');
     EEG.setname = sprintf('Subject %d - All Conditions Clean', s);
     EEG.filename = output_filename;
     pop_saveset(EEG, 'filename', output_filename, 'filepath', epoch_folder, 'savemode', 'twofiles');
 
-    processed_count = processed_count + 1;
+    results.processed(file_idx) = true;
     fprintf('Saved: %s\n', output_filepath);
 end
+
+stats = aggregate_epoch_stats(stats, results, condition_names);
+processing_summary = build_processing_summary(stats, condition_names);
 
 fprintf('\n==============================================\n');
 fprintf('  EPOCHING COMPLETE\n');
 fprintf('==============================================\n');
-fprintf('Processed subjects: %d\n', processed_count);
-fprintf('Skipped subjects:   %d\n', skipped_count);
-fprintf('Excluded subjects:  %d\n', numel(excluded_subjects));
-if ~isempty(excluded_subjects)
+fprintf('Processed subjects: %d\n', stats.processed_subjects);
+fprintf('Skipped subjects:   %d\n', sum(results.skipped));
+fprintf('Excluded subjects:  %d\n', stats.excluded_subjects);
+if stats.excluded_subjects > 0
     fprintf('Exclusions:\n');
-    for i = 1:numel(excluded_subjects)
-        fprintf('  - %s\n', excluded_subjects{i});
+    for i = 1:numel(stats.exclusion_reasons)
+        fprintf('  - %s\n', stats.exclusion_reasons{i});
     end
 end
+
+try
+    write_summary_text_file(summary_txt_file, processing_summary, stats);
+    fprintf('Processing summary: %s\n', summary_txt_file);
+catch ME
+    fprintf('WARNING: Could not write summary text file (%s)\n', ME.message);
+end
+
 fprintf('Output folder: %s\n', epoch_folder);
 fprintf('==============================================\n\n');
 
+end
+
+function stats = initialize_epoch_stats(total_subjects, voltage_diff_threshold, voltage_abs_threshold, max_rejected_trials_per_group, condition_names)
+stats = struct();
+stats.total_subjects = total_subjects;
+stats.processed_subjects = 0;
+stats.excluded_subjects = 0;
+stats.excluded_subject_ids = {};
+stats.voltage_diff_threshold = voltage_diff_threshold;
+stats.voltage_abs_threshold = voltage_abs_threshold;
+stats.max_rejected_trials_per_group = max_rejected_trials_per_group;
+stats.total_original_trials = 0;
+stats.total_final_trials = 0;
+stats.total_removed_trials = 0;
+stats.SME_removals = [];
+stats.SME_original_trials = [];
+stats.SME_final_trials = [];
+stats.Test_Intact_removals = [];
+stats.Test_Intact_original_trials = [];
+stats.Test_Intact_final_trials = [];
+stats.Test_Recombined_removals = [];
+stats.Test_Recombined_original_trials = [];
+stats.Test_Recombined_final_trials = [];
+stats.condition1_removals = [];
+stats.condition2_removals = [];
+stats.total_removals_per_subject = [];
+stats.subject_ids = [];
+stats.subject_original_trials = [];
+stats.subject_final_trials = [];
+stats.subject_removed_trials = [];
+stats.condition_original_trials = struct();
+stats.condition_final_trials = struct();
+stats.condition_removed_trials = struct();
+for c = 1:numel(condition_names)
+    cond_name = condition_names{c};
+    stats.condition_original_trials.(cond_name) = [];
+    stats.condition_final_trials.(cond_name) = [];
+    stats.condition_removed_trials.(cond_name) = [];
+end
+stats.exclusion_reasons = {};
+end
+
+function results = initialize_epoch_results(total_subjects, condition_names)
+results = struct();
+results.processed = false(total_subjects, 1);
+results.skipped = false(total_subjects, 1);
+results.excluded = false(total_subjects, 1);
+results.exclusion_reason = cell(total_subjects, 1);
+results.subject_id = cell(total_subjects, 1);
+results.original_trials = zeros(total_subjects, 1);
+results.final_trials = zeros(total_subjects, 1);
+results.removed_trials = zeros(total_subjects, 1);
+results.condition1_removals = zeros(total_subjects, 1);
+results.condition2_removals = zeros(total_subjects, 1);
+results.SME_removals = zeros(total_subjects, 1);
+results.SME_original = zeros(total_subjects, 1);
+results.SME_final = zeros(total_subjects, 1);
+results.Test_Intact_removals = zeros(total_subjects, 1);
+results.Test_Intact_original = zeros(total_subjects, 1);
+results.Test_Intact_final = zeros(total_subjects, 1);
+results.Test_Recombined_removals = zeros(total_subjects, 1);
+results.Test_Recombined_original = zeros(total_subjects, 1);
+results.Test_Recombined_final = zeros(total_subjects, 1);
+for c = 1:numel(condition_names)
+    cond_name = condition_names{c};
+    results.(['cond_orig_' cond_name]) = zeros(total_subjects, 1);
+    results.(['cond_final_' cond_name]) = zeros(total_subjects, 1);
+    results.(['cond_removed_' cond_name]) = zeros(total_subjects, 1);
+end
+end
+
+function out = condition_struct_from_map(cond_counts, condition_names)
+out = struct();
+for c = 1:numel(condition_names)
+    out.(condition_names{c}) = 0;
+end
+if isempty(cond_counts)
+    return;
+end
+map_keys = cond_counts.keys;
+for i = 1:numel(map_keys)
+    key = map_keys{i};
+    if isfield(out, key)
+        out.(key) = cond_counts(key);
+    end
+end
+end
+
+function stats = aggregate_epoch_stats(stats, results, condition_names)
+stats.processed_subjects = sum(results.processed);
+stats.excluded_subjects = sum(results.excluded);
+
+excluded_indices = find(results.excluded);
+stats.excluded_subject_ids = results.subject_id(excluded_indices);
+stats.exclusion_reasons = results.exclusion_reason(excluded_indices);
+
+processed_not_excluded = results.processed & ~results.excluded & ~results.skipped;
+
+stats.total_original_trials = sum(results.original_trials(processed_not_excluded));
+stats.total_final_trials = sum(results.final_trials(processed_not_excluded));
+stats.total_removed_trials = sum(results.removed_trials(processed_not_excluded));
+
+stats.condition1_removals = results.condition1_removals(processed_not_excluded);
+stats.condition2_removals = results.condition2_removals(processed_not_excluded);
+stats.total_removals_per_subject = results.removed_trials(processed_not_excluded);
+
+stats.SME_removals = results.SME_removals(processed_not_excluded);
+stats.SME_original_trials = results.SME_original(processed_not_excluded);
+stats.SME_final_trials = results.SME_final(processed_not_excluded);
+stats.Test_Intact_removals = results.Test_Intact_removals(processed_not_excluded);
+stats.Test_Intact_original_trials = results.Test_Intact_original(processed_not_excluded);
+stats.Test_Intact_final_trials = results.Test_Intact_final(processed_not_excluded);
+stats.Test_Recombined_removals = results.Test_Recombined_removals(processed_not_excluded);
+stats.Test_Recombined_original_trials = results.Test_Recombined_original(processed_not_excluded);
+stats.Test_Recombined_final_trials = results.Test_Recombined_final(processed_not_excluded);
+
+for c = 1:numel(condition_names)
+    cond_name = condition_names{c};
+    stats.condition_original_trials.(cond_name) = results.(['cond_orig_' cond_name])(processed_not_excluded);
+    stats.condition_final_trials.(cond_name) = results.(['cond_final_' cond_name])(processed_not_excluded);
+    stats.condition_removed_trials.(cond_name) = results.(['cond_removed_' cond_name])(processed_not_excluded);
+end
+
+valid_subject_ids = results.subject_id(processed_not_excluded);
+if isempty(valid_subject_ids)
+    stats.subject_ids = [];
+else
+    stats.subject_ids = cellfun(@str2double, valid_subject_ids);
+end
+stats.subject_original_trials = results.original_trials(processed_not_excluded);
+stats.subject_final_trials = results.final_trials(processed_not_excluded);
+stats.subject_removed_trials = results.removed_trials(processed_not_excluded);
+end
+
+function processing_summary = build_processing_summary(stats, condition_names)
+processing_summary = struct();
+
+processing_summary.metadata = struct();
+processing_summary.metadata.processing_date = datestr(now);
+processing_summary.metadata.total_subjects_selected = stats.total_subjects;
+processing_summary.metadata.successfully_processed = stats.processed_subjects;
+processing_summary.metadata.excluded_subjects = stats.excluded_subjects;
+processing_summary.metadata.excluded_subject_ids = stats.excluded_subject_ids;
+processing_summary.metadata.exclusion_reasons = stats.exclusion_reasons;
+processing_summary.metadata.processing_success_rate = safe_percent(stats.processed_subjects, stats.total_subjects);
+
+processing_summary.parameters = struct();
+processing_summary.parameters.voltage_diff_threshold = stats.voltage_diff_threshold;
+processing_summary.parameters.voltage_abs_threshold = stats.voltage_abs_threshold;
+processing_summary.parameters.max_rejected_trials_per_group = stats.max_rejected_trials_per_group;
+processing_summary.parameters.epoch_window = [-0.1, 1.5];
+processing_summary.parameters.baseline_window = [-100, 0];
+
+processing_summary.overall = struct();
+processing_summary.overall.total_original_trials = stats.total_original_trials;
+processing_summary.overall.total_final_trials = stats.total_final_trials;
+processing_summary.overall.total_removed_trials = stats.total_removed_trials;
+processing_summary.overall.overall_removal_rate = safe_percent(stats.total_removed_trials, stats.total_original_trials);
+processing_summary.overall.data_retention_rate = safe_percent(stats.total_final_trials, stats.total_original_trials);
+
+processing_summary.condition_based = struct();
+processing_summary.condition_based.condition1_removals = stats.condition1_removals;
+processing_summary.condition_based.condition2_removals = stats.condition2_removals;
+processing_summary.condition_based.condition1_mean = safe_mean(stats.condition1_removals);
+processing_summary.condition_based.condition1_std = safe_std(stats.condition1_removals);
+processing_summary.condition_based.condition2_mean = safe_mean(stats.condition2_removals);
+processing_summary.condition_based.condition2_std = safe_std(stats.condition2_removals);
+processing_summary.condition_based.overlap_trials = ...
+    sum(stats.condition1_removals) + sum(stats.condition2_removals) - stats.total_removed_trials;
+
+processing_summary.group_based = struct();
+processing_summary.group_based.SME = build_group_summary(stats.SME_original_trials, stats.SME_removals, stats.SME_final_trials);
+processing_summary.group_based.Test_Intact = build_group_summary(stats.Test_Intact_original_trials, stats.Test_Intact_removals, stats.Test_Intact_final_trials);
+processing_summary.group_based.Test_Recombined = build_group_summary(stats.Test_Recombined_original_trials, stats.Test_Recombined_removals, stats.Test_Recombined_final_trials);
+
+processing_summary.experimental_conditions = struct();
+for c = 1:numel(condition_names)
+    cond_name = condition_names{c};
+    original_trials = stats.condition_original_trials.(cond_name);
+    removed_trials = stats.condition_removed_trials.(cond_name);
+    final_trials = stats.condition_final_trials.(cond_name);
+
+    processing_summary.experimental_conditions.(cond_name) = struct();
+    processing_summary.experimental_conditions.(cond_name).original_trials = original_trials;
+    processing_summary.experimental_conditions.(cond_name).removed_trials = removed_trials;
+    processing_summary.experimental_conditions.(cond_name).final_trials = final_trials;
+    processing_summary.experimental_conditions.(cond_name).mean_original = safe_mean(original_trials);
+    processing_summary.experimental_conditions.(cond_name).mean_removed = safe_mean(removed_trials);
+    processing_summary.experimental_conditions.(cond_name).mean_final = safe_mean(final_trials);
+    processing_summary.experimental_conditions.(cond_name).std_original = safe_std(original_trials);
+    processing_summary.experimental_conditions.(cond_name).std_removed = safe_std(removed_trials);
+    processing_summary.experimental_conditions.(cond_name).std_final = safe_std(final_trials);
+    processing_summary.experimental_conditions.(cond_name).removal_rate = safe_percent(sum(removed_trials), sum(original_trials));
+end
+
+processing_summary.subject_based = struct();
+processing_summary.subject_based.subject_ids = stats.subject_ids;
+processing_summary.subject_based.original_trials = stats.subject_original_trials;
+processing_summary.subject_based.removed_trials = stats.subject_removed_trials;
+processing_summary.subject_based.final_trials = stats.subject_final_trials;
+processing_summary.subject_based.mean_original = safe_mean(stats.subject_original_trials);
+processing_summary.subject_based.mean_removed = safe_mean(stats.subject_removed_trials);
+processing_summary.subject_based.mean_final = safe_mean(stats.subject_final_trials);
+processing_summary.subject_based.std_original = safe_std(stats.subject_original_trials);
+processing_summary.subject_based.std_removed = safe_std(stats.subject_removed_trials);
+processing_summary.subject_based.std_final = safe_std(stats.subject_final_trials);
+processing_summary.subject_based.removal_rate = safe_percent(sum(stats.subject_removed_trials), sum(stats.subject_original_trials));
+processing_summary.subject_based.range_original = [safe_min(stats.subject_original_trials), safe_max(stats.subject_original_trials)];
+processing_summary.subject_based.range_removed = [safe_min(stats.subject_removed_trials), safe_max(stats.subject_removed_trials)];
+processing_summary.subject_based.range_final = [safe_min(stats.subject_final_trials), safe_max(stats.subject_final_trials)];
+
+processing_summary.quality_assessment = struct();
+processing_summary.quality_assessment.retention_rate = safe_percent(stats.total_final_trials, stats.total_original_trials);
+if processing_summary.quality_assessment.retention_rate >= 85
+    processing_summary.quality_assessment.quality_rating = 'EXCELLENT';
+elseif processing_summary.quality_assessment.retention_rate >= 75
+    processing_summary.quality_assessment.quality_rating = 'GOOD';
+elseif processing_summary.quality_assessment.retention_rate >= 65
+    processing_summary.quality_assessment.quality_rating = 'ACCEPTABLE';
+else
+    processing_summary.quality_assessment.quality_rating = 'CONCERNING';
+end
+processing_summary.quality_assessment.subjects_approaching_threshold = sum(stats.total_removals_per_subject > 40);
+end
+
+function group_summary = build_group_summary(original_trials, removed_trials, final_trials)
+group_summary = struct();
+group_summary.original_trials = original_trials;
+group_summary.removed_trials = removed_trials;
+group_summary.final_trials = final_trials;
+group_summary.mean_original = safe_mean(original_trials);
+group_summary.mean_removed = safe_mean(removed_trials);
+group_summary.mean_final = safe_mean(final_trials);
+group_summary.std_original = safe_std(original_trials);
+group_summary.std_removed = safe_std(removed_trials);
+group_summary.std_final = safe_std(final_trials);
+group_summary.removal_rate = safe_percent(sum(removed_trials), sum(original_trials));
+end
+
+function write_summary_text_file(summary_txt_file, processing_summary, stats)
+[fid, msg] = fopen(summary_txt_file, 'w');
+if fid == -1
+    error('Unable to open summary file: %s', msg);
+end
+cleanup_fid = onCleanup(@() fclose(fid)); %#ok<NASGU>
+
+fprintf(fid, 'Processing Summary Export\n');
+fprintf(fid, 'Generated: %s\n\n', datestr(now));
+fprintf(fid, '[processing_summary]\n');
+write_struct_lines(fid, 'processing_summary', processing_summary);
+fprintf(fid, '\n[stats]\n');
+write_struct_lines(fid, 'stats', stats);
+end
+
+function write_struct_lines(fid, prefix, value)
+if isstruct(value)
+    fields = fieldnames(value);
+    for i = 1:numel(fields)
+        field_name = fields{i};
+        write_struct_lines(fid, [prefix '.' field_name], value.(field_name));
+    end
+    return;
+end
+fprintf(fid, '%s = %s\n', prefix, format_value_for_text(value));
+end
+
+function out = format_value_for_text(value)
+if isnumeric(value) || islogical(value)
+    out = mat2str(value);
+elseif ischar(value)
+    out = value;
+elseif isstring(value)
+    if isscalar(value)
+        out = char(value);
+    else
+        out = strjoin(cellstr(value), ', ');
+    end
+elseif iscell(value)
+    if isempty(value)
+        out = '{}';
+    else
+        parts = cell(1, numel(value));
+        for i = 1:numel(value)
+            parts{i} = format_value_for_text(value{i});
+        end
+        out = ['{' strjoin(parts, ', ') '}'];
+    end
+else
+    out = '<unsupported>';
+end
+end
+
+function value = safe_mean(x)
+if isempty(x)
+    value = NaN;
+else
+    value = mean(x);
+end
+end
+
+function value = safe_std(x)
+if isempty(x)
+    value = NaN;
+else
+    value = std(x);
+end
+end
+
+function value = safe_min(x)
+if isempty(x)
+    value = NaN;
+else
+    value = min(x);
+end
+end
+
+function value = safe_max(x)
+if isempty(x)
+    value = NaN;
+else
+    value = max(x);
+end
+end
+
+function value = safe_percent(numerator, denominator)
+if denominator <= 0
+    value = 0;
+else
+    value = (numerator / denominator) * 100;
+end
 end
 
 function out = parse_optional_subject_filter(value)

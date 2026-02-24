@@ -37,7 +37,9 @@ CONDITION_ORDER=""  # optional: comma-separated labels; empty = infer from trial
 # 1 = submit hpc_epoch_to_erp_plot after Stage 3
 # 0 = skip ERP branch and run only the LIMO branch
 RUN_EPOCH_ERP_BRANCH="0"
-TRIAL_TYPES_CSV="Study_hits,Study_misses"
+# Supports comma or semicolon separators. For sbatch --export, semicolon is
+# safer because commas are also env separators.
+TRIAL_TYPES_CSV="Study_hits;Study_misses"
 ERP_CHANNELS_CSV="21"
 ERP_OUTPUT_DIR=""     # empty => <EPOCH>/erp_plots
 ERP_FIGURE_TITLE=""   # empty => default title from hpc_epoch_to_erp_plot.m
@@ -191,11 +193,13 @@ echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
 # ============================================================
 JOB4A=""
 if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
+  # Escape commas so sbatch --export does not split TRIAL_TYPES_CSV values.
+  TRIAL_TYPES_FOR_EXPORT="${TRIAL_TYPES_CSV//,/\\,}"
   JOB4A=$(sbatch --parsable \
     --dependency=afterok:${JOB3} \
     --output="${LOG_STAGE4A_DIR}/%x_%j.out" \
     --error="${LOG_STAGE4A_DIR}/%x_%j.err" \
-    --export=ALL,INPUT_FOLDER="${EPOCH}",TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV}",CHANNELS_CSV="${ERP_CHANNELS_CSV}",OUTPUT_DIR="${ERP_OUTPUT_DIR}",FIGURE_TITLE="${ERP_FIGURE_TITLE}" \
+    --export=ALL,INPUT_FOLDER="${EPOCH}",TRIAL_TYPES_CSV="${TRIAL_TYPES_FOR_EXPORT}",CHANNELS_CSV="${ERP_CHANNELS_CSV}",OUTPUT_DIR="${ERP_OUTPUT_DIR}",FIGURE_TITLE="${ERP_FIGURE_TITLE}" \
     "${SCRIPTS}/hpc_epoch_to_erp_plot.slurm")
   echo "Submitted job4A (epoch_to_erp_plot):         ${JOB4A}"
 fi
