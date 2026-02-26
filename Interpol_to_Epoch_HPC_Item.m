@@ -227,17 +227,18 @@ for file_idx = 1:length(file_info)
         continue;
     end
 
-    EEG = pop_loadset('filename', input_filename, 'filepath', input_filepath);
-    fprintf('\nProcessing subject %d (%s study)...\n', s, study_id);
-    
-    % Clear any existing trial_type field before processing
-    if isfield(EEG.event, 'trial_type')
-        EEG.event = rmfield(EEG.event, 'trial_type');
-    end
+    try
+        EEG = pop_loadset('filename', input_filename, 'filepath', input_filepath);
+        fprintf('\nProcessing subject %d (%s study)...\n', s, study_id);
+        
+        % Clear any existing trial_type field before processing
+        if isfield(EEG.event, 'trial_type')
+            EEG.event = rmfield(EEG.event, 'trial_type');
+        end
 
-    % =========================================================================
-    % ===== NEW ROBUST WORKFLOW STARTS HERE ===================================
-    % =========================================================================
+        % =========================================================================
+        % ===== NEW ROBUST WORKFLOW STARTS HERE ===================================
+        % =========================================================================
 
     % --- STEP 1: Epoch all trials for all conditions of interest together ---
     % Legacy item-recognition structure:
@@ -528,9 +529,16 @@ for file_idx = 1:length(file_info)
     parallel_results.Test_Recombined_original(file_idx) = subject_stats.Test_Recombined_original;
     parallel_results.Test_Recombined_final(file_idx) = subject_stats.Test_Recombined_final;
 
-    % =========================================================================
-    % ===== END OF NEW WORKFLOW ===============================================
-    % =========================================================================
+        % =========================================================================
+        % ===== END OF NEW WORKFLOW ===============================================
+        % =========================================================================
+    catch ME
+        parallel_results.excluded(file_idx) = true;
+        parallel_results.exclusion_reason{file_idx} = sprintf('Subject %d (%s): processing error: %s', s, study_id, ME.message);
+        fprintf('  ERROR: Subject %d (%s study) failed and will be skipped.\n', s, study_id);
+        fprintf('  ERROR DETAILS: %s\n', ME.message);
+        continue;
+    end
 end
 
 % ==================== AGGREGATE PARALLEL RESULTS ====================

@@ -1,6 +1,6 @@
 # Session Log Migration Guide
 
-This document explains exactly what to change in your session `.log` format so it works with `hpc_raw_to_set.m`.
+This document explains how to add a new normalized session log so it works with `hpc_raw_to_set.m` while keeping your current session log format unchanged.
 
 It is based on your current format in:
 - `/Users/devon7y/VS_Code/PyEPL3/data/12/session_12.log`
@@ -21,6 +21,11 @@ Your current logs are tab-delimited but mixed-layout (no header row, variable co
   - `timestamp    0    list_id    trial    ASSOC    word1    word1_id    word2    word2_id    target    response    accuracy    rt`
 
 Problem: the new pipeline no longer derives condition labels from this mixed structure. It expects precomputed labels in a normalized event table.
+
+Important:
+- Keep your existing `session.log` format unchanged.
+- Create a separate normalized file named `#_session.log` where `#` is the subject ID (example: `12_session.log`).
+- Use `.eeglog` content updates in-place and keep one subject file named `#.eegog` (example: `12.eegog`).
 
 ## Target Format (What You Need)
 
@@ -68,11 +73,9 @@ You may include extra columns; unknown columns are ignored.
 - If you keep them, set `event_label` blank (or `include_in_analysis=0`) so they are ignored.
 
 6. Ensure filename matching remains unambiguous.
-- Keep subject ID in `.log` and `.eeglog` filenames as standalone numeric token.
-- Good examples for subject `12`:
-  - `session_12.log`
-  - `12.eeglog`
-  - `sub-12_session.log`
+- Keep the original session log as-is.
+- Add one normalized session log named `#_session.log` (subject `12` -> `12_session.log`).
+- Use one `.eegog` file named `#.eegog` and modify that existing file in-place (subject `12` -> `12.eegog`).
 
 ## Suggested Canonical Header
 
@@ -88,7 +91,7 @@ Notes:
 
 ## Mapping From Your Current Rows
 
-Use this mapping when writing the new log format.
+Use this mapping when writing the new normalized `#_session.log` file.
 
 1. Study rows (current 9-column rows):
 - Current fields:
@@ -157,7 +160,9 @@ timestamp	block	list_id	trial	phase	word1	word2	word1_id	word2_id	target	respons
 - `group_spec` is aligned with those triggers
 
 5. Subject file naming is unambiguous:
-- one session `.log` and one `.eeglog` per subject match
+- original session log remains unchanged
+- one normalized `#_session.log` per subject exists
+- one `#.eegog` per subject exists and is modified in-place (not duplicated)
 
 ## Minimal Rule Set (If You Want the Short Version)
 
@@ -167,4 +172,3 @@ If you only do four things, do these:
 2. Add `trigger_code` column.
 3. Add `event_label` column (precomputed final condition name).
 4. Keep analyzable rows in one fixed tabular schema.
-

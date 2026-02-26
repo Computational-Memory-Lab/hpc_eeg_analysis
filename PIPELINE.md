@@ -139,10 +139,10 @@ Output:
 ### 4A) Epoch -> ERP Grand Average Plot (Branch)
 
 ```matlab
-hpc_epoch_to_erp_plot(input_folder, trial_type_values)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
 ```
 
 Inputs:
@@ -150,14 +150,23 @@ Inputs:
 - `trial_type_values`: labels to plot, accepts comma/semicolon list, string-array, or cell
   - examples: `{'Study_hits','Study_misses'}`, `'Study_hits,Study_misses'`, or `'Study_hits;Study_misses'`
 - for `sbatch --export`, prefer semicolon separator (`;`) because commas also separate env vars
-- optional `channels`: channel indices for averaging (default `21`)
+- required `channels`: channel indices for averaging
+  - accepts numeric vector or comma/semicolon/space-separated string (for `sbatch --export`, semicolon is safer)
 - optional `output_dir`: default `epoch/erp_plots`
 - optional `figure_title`: full custom title
+- optional `time_window_ms`: one or more `[start end]` windows
+  - examples: `'300-500'`, `'300-500;600-800'`, or `[300 500; 600 800]`
+  - when provided and exactly two conditions are requested:
+    - the function computes subject-level mean voltage in each window for each condition
+    - runs a paired t-test between the two condition window means (per window)
+    - highlights each selected window on the ERP plot
+    - annotates per-window significance on the plot
 
 Outputs:
 - `epoch/erp_plots/grand_average_erp_<trial_types>.png`
 - `epoch/erp_plots/grand_average_erp_<trial_types>.svg`
 - `epoch/erp_plots/grand_average_erp_<trial_types>.mat`
+- `epoch/erp_plots/grand_average_erp_<trial_types>_stats_<timestamp>.txt`
 
 ### 4B) LIMO First Level
 
@@ -242,9 +251,9 @@ For organized runs, override `--output` and `--error` at submission time.
   - optional subject scope: `SUBJECT_ID`
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_epoch_to_erp_plot.slurm`
-  - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`
+  - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`, `CHANNELS_CSV`
     - `TRIAL_TYPES_CSV` supports comma/semicolon separators (semicolon preferred for `sbatch --export`)
-  - optional: `CHANNELS_CSV`, `OUTPUT_DIR`, `FIGURE_TITLE`
+  - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
 - `hpc_limo_second_level.slurm`
@@ -276,9 +285,10 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 - optional Stage 4A ERP branch:
   - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)
   - `TRIAL_TYPES_CSV` (comma/semicolon list; semicolon preferred)
-  - `ERP_CHANNELS_CSV`
+  - `ERP_CHANNELS_CSV` (required when `RUN_EPOCH_ERP_BRANCH=1`)
   - `ERP_OUTPUT_DIR` (empty => `epoch/erp_plots`)
   - `ERP_FIGURE_TITLE`
+  - `ERP_TIME_WINDOW_MS` (optional window(s) for stats/highlight, example: `"300-500;600-800"`)
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)
 - subject-manifest generation from `RAW_INPUT/*.raw`
 - Stage 1-3 submission as SLURM arrays (`--array`) with throttles:

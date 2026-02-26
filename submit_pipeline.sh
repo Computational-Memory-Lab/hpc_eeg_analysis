@@ -40,9 +40,10 @@ RUN_EPOCH_ERP_BRANCH="0"
 # Supports comma or semicolon separators. For sbatch --export, semicolon is
 # safer because commas are also env separators.
 TRIAL_TYPES_CSV="Study_hits;Study_misses"
-ERP_CHANNELS_CSV="21"
+ERP_CHANNELS_CSV=""  # required when RUN_EPOCH_ERP_BRANCH=1 (example: "21" or "21,22")
 ERP_OUTPUT_DIR=""     # empty => <EPOCH>/erp_plots
 ERP_FIGURE_TITLE=""   # empty => default title from hpc_epoch_to_erp_plot.m
+ERP_TIME_WINDOW_MS="" # optional examples: "300-500" or "300-500;600-800"
 
 # Contrast entries:
 #   key|condition_label_1|condition_label_2|display_title
@@ -82,6 +83,11 @@ fi
 
 if [[ "${RUN_EPOCH_ERP_BRANCH}" != "0" && "${RUN_EPOCH_ERP_BRANCH}" != "1" ]]; then
   echo "ERROR: RUN_EPOCH_ERP_BRANCH must be 0 or 1, got: ${RUN_EPOCH_ERP_BRANCH}" >&2
+  exit 1
+fi
+
+if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" && -z "${ERP_CHANNELS_CSV//[[:space:]]/}" ]]; then
+  echo "ERROR: ERP_CHANNELS_CSV is required when RUN_EPOCH_ERP_BRANCH=1" >&2
   exit 1
 fi
 
@@ -195,11 +201,13 @@ JOB4A=""
 if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
   # Escape commas so sbatch --export does not split TRIAL_TYPES_CSV values.
   TRIAL_TYPES_FOR_EXPORT="${TRIAL_TYPES_CSV//,/\\,}"
+  # Escape commas for multi-channel values (example: "21,22").
+  ERP_CHANNELS_FOR_EXPORT="${ERP_CHANNELS_CSV//,/\\,}"
   JOB4A=$(sbatch --parsable \
     --dependency=afterok:${JOB3} \
     --output="${LOG_STAGE4A_DIR}/%x_%j.out" \
     --error="${LOG_STAGE4A_DIR}/%x_%j.err" \
-    --export=ALL,INPUT_FOLDER="${EPOCH}",TRIAL_TYPES_CSV="${TRIAL_TYPES_FOR_EXPORT}",CHANNELS_CSV="${ERP_CHANNELS_CSV}",OUTPUT_DIR="${ERP_OUTPUT_DIR}",FIGURE_TITLE="${ERP_FIGURE_TITLE}" \
+    --export=ALL,INPUT_FOLDER="${EPOCH}",TRIAL_TYPES_CSV="${TRIAL_TYPES_FOR_EXPORT}",CHANNELS_CSV="${ERP_CHANNELS_FOR_EXPORT}",OUTPUT_DIR="${ERP_OUTPUT_DIR}",FIGURE_TITLE="${ERP_FIGURE_TITLE}",TIME_WINDOW_MS="${ERP_TIME_WINDOW_MS}" \
     "${SCRIPTS}/hpc_epoch_to_erp_plot.slurm")
   echo "Submitted job4A (epoch_to_erp_plot):         ${JOB4A}"
 fi
