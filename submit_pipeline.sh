@@ -27,6 +27,7 @@ ARRAY_THROTTLE_STAGE3="24"
 # ============================================================
 VOLTAGE_DIFF="20"
 VOLTAGE_ABS="1000"
+EPOCH_WINDOW=""   # REQUIRED (seconds), example: "-0.1;1.5"
 EPOCH_TRIGGERS_CSV="11,21,22"
 EPOCH_GROUP_SPEC="SME:11;Test_Intact:21;Test_Recombined:22"
 CONDITION_ORDER=""  # optional: comma-separated labels; empty = infer from trial_type
@@ -88,6 +89,11 @@ fi
 
 if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" && -z "${ERP_CHANNELS_CSV//[[:space:]]/}" ]]; then
   echo "ERROR: ERP_CHANNELS_CSV is required when RUN_EPOCH_ERP_BRANCH=1" >&2
+  exit 1
+fi
+
+if [[ -z "${EPOCH_WINDOW//[[:space:]]/}" ]]; then
+  echo "ERROR: EPOCH_WINDOW is required (seconds), example: -0.1;1.5" >&2
   exit 1
 fi
 
@@ -185,12 +191,14 @@ echo "Submitted job2 array (set_to_interpol):       ${JOB2}"
 # ============================================================
 # STAGE 3: interpol -> epoch (array)
 # ============================================================
+# Escape commas so sbatch --export does not split EPOCH_WINDOW values.
+EPOCH_WINDOW_FOR_EXPORT="${EPOCH_WINDOW//,/\\,}"
 JOB3=$(sbatch --parsable \
   --dependency=afterok:${JOB2} \
   --array=1-${NUM_SUBJECTS}%${ARRAY_THROTTLE_STAGE3} \
   --output="${LOG_STAGE3_DIR}/%x_%A_%a.out" \
   --error="${LOG_STAGE3_DIR}/%x_%A_%a.err" \
-  --export=ALL,INPUT_FOLDER="${INTERPOL}",SUBJECTS_FILE="${SUBJECTS_FILE}",VOLTAGE_DIFF="${VOLTAGE_DIFF}",VOLTAGE_ABS="${VOLTAGE_ABS}",EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV}",EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC}" \
+  --export=ALL,INPUT_FOLDER="${INTERPOL}",SUBJECTS_FILE="${SUBJECTS_FILE}",VOLTAGE_DIFF="${VOLTAGE_DIFF}",VOLTAGE_ABS="${VOLTAGE_ABS}",EPOCH_WINDOW="${EPOCH_WINDOW_FOR_EXPORT}",EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV}",EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC}" \
   "${SCRIPTS}/hpc_interpol_to_epoch.slurm")
 echo "Submitted job3 array (interpol_to_epoch):     ${JOB3}"
 

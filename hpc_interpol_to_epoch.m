@@ -1,18 +1,22 @@
-function hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
+function hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 % HPC_INTERPOL_TO_EPOCH - Epoch EEG data and apply artifact rejection
 %
 % Usage:
-%   hpc_interpol_to_epoch(input_folder)
-%   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold)
-%   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
-%   hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
+%   hpc_interpol_to_epoch(input_folder, epoch_window)
+%   hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold)
+%   hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
+%   hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 %
 % Inputs:
 %   input_folder           - Path to folder containing .set files
+%   epoch_window           - REQUIRED [start end] window in seconds.
+%                            No default. Must be specified every run.
+%                            Accepts numeric [start end] or string forms
+%                            like '-0.1,1.5' / '-0.1 1.5'.
 %   voltage_diff_threshold - Max voltage difference threshold in uV (default: 20)
 %   voltage_abs_threshold  - Max absolute voltage threshold in uV (default: 1000)
 %   epoch_triggers         - Trigger codes for epoching (default: {'11','21','22'})
-%                            Accepts cell array, numeric array, or CSV string.
+%                            Accepts cell array, numeric array, or comma/semicolon string.
 %   group_spec             - Artifact rejection groups by trigger code.
 %                            Default: 'SME:11;Test_Intact:21;Test_Recombined:22'
 %                            Accepts:
@@ -25,19 +29,25 @@ function hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs
 %   - Epoching uses trigger codes (EEG.event.type), not event_label.
 %   - trial_type is assigned from EEG.event.event_label after epoching.
 
-if nargin < 2 || isempty(voltage_diff_threshold)
+if nargin < 2 || isempty(epoch_window)
+    error(['epoch_window is required. Provide [start end] in seconds, ' ...
+           'for example [-0.1 1.5] or ''-0.1,1.5''.']);
+end
+epoch_window = parse_epoch_window(epoch_window);
+
+if nargin < 3 || isempty(voltage_diff_threshold)
     voltage_diff_threshold = 20;
 end
-if nargin < 3 || isempty(voltage_abs_threshold)
+if nargin < 4 || isempty(voltage_abs_threshold)
     voltage_abs_threshold = 1000;
 end
-if nargin < 4 || isempty(epoch_triggers)
+if nargin < 5 || isempty(epoch_triggers)
     epoch_triggers = {'11', '21', '22'};
 end
-if nargin < 5 || isempty(group_spec)
+if nargin < 6 || isempty(group_spec)
     group_spec = 'SME:11;Test_Intact:21;Test_Recombined:22';
 end
-if nargin < 6
+if nargin < 7
     subject_filter = [];
 else
     subject_filter = parse_optional_subject_filter(subject_filter);
@@ -64,6 +74,7 @@ fprintf('\n==============================================\n');
 fprintf('  HPC INTERPOL -> EPOCH\n');
 fprintf('==============================================\n');
 fprintf('Input folder:                %s\n', input_folder);
+fprintf('Epoch window (s):            [%.3f %.3f]\n', epoch_window(1), epoch_window(2));
 fprintf('Voltage diff threshold (uV): %.1f\n', voltage_diff_threshold);
 fprintf('Voltage abs threshold  (uV): %.1f\n', voltage_abs_threshold);
 fprintf('Epoch triggers:              %s\n', strjoin(epoch_triggers, ','));
@@ -129,7 +140,7 @@ max_rejected_trials_per_group = 56;
 
 % Legacy-compatible summary containers (replaces old Processing_Summary_*.mat content).
 stats = initialize_epoch_stats(length(file_info), voltage_diff_threshold, ...
-    voltage_abs_threshold, max_rejected_trials_per_group, condition_names);
+    voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window);
 results = initialize_epoch_results(length(file_info), condition_names);
 
 for file_idx = 1:length(file_info)
@@ -162,7 +173,7 @@ for file_idx = 1:length(file_info)
     end
 
     % STEP 1: epoch by trigger codes
-    EEG = pop_epoch(EEG, epoch_triggers, [-0.1 1.5], ...
+    EEG = pop_epoch(EEG, epoch_triggers, epoch_window, ...
         'newname', sprintf('Subject %d - all epoched', s), 'epochinfo', 'yes');
     EEG = pop_rmbase(EEG, [-100 0]);
     results.original_trials(file_idx) = EEG.trials;
@@ -324,7 +335,7 @@ fprintf('==============================================\n\n');
 
 end
 
-function stats = initialize_epoch_stats(total_subjects, voltage_diff_threshold, voltage_abs_threshold, max_rejected_trials_per_group, condition_names)
+function stats = initialize_epoch_stats(total_subjects, voltage_diff_threshold, voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window)
 stats = struct();
 stats.total_subjects = total_subjects;
 stats.processed_subjects = 0;
@@ -333,6 +344,7 @@ stats.excluded_subject_ids = {};
 stats.voltage_diff_threshold = voltage_diff_threshold;
 stats.voltage_abs_threshold = voltage_abs_threshold;
 stats.max_rejected_trials_per_group = max_rejected_trials_per_group;
+stats.epoch_window = epoch_window;
 stats.total_original_trials = 0;
 stats.total_final_trials = 0;
 stats.total_removed_trials = 0;
@@ -472,7 +484,7 @@ processing_summary.parameters = struct();
 processing_summary.parameters.voltage_diff_threshold = stats.voltage_diff_threshold;
 processing_summary.parameters.voltage_abs_threshold = stats.voltage_abs_threshold;
 processing_summary.parameters.max_rejected_trials_per_group = stats.max_rejected_trials_per_group;
-processing_summary.parameters.epoch_window = [-0.1, 1.5];
+processing_summary.parameters.epoch_window = stats.epoch_window;
 processing_summary.parameters.baseline_window = [-100, 0];
 
 processing_summary.overall = struct();
@@ -654,6 +666,35 @@ else
 end
 end
 
+function out = parse_epoch_window(value)
+if isnumeric(value)
+    if numel(value) ~= 2 || any(~isfinite(value))
+        error('epoch_window numeric input must be exactly two finite values: [start end].');
+    end
+    out = double(value(:)');
+elseif ischar(value) || (isstring(value) && isscalar(value))
+    txt = strtrim(char(value));
+    if isempty(txt)
+        error('epoch_window string input is empty.');
+    end
+    txt = regexprep(txt, '[\[\]\(\)]', ' ');
+    txt = strrep(txt, ',', ' ');
+    txt = strrep(txt, ';', ' ');
+    vals = sscanf(txt, '%f');
+    if numel(vals) ~= 2
+        error(['epoch_window string input must contain exactly two numbers, ' ...
+               'for example ''-0.1,1.5''.']);
+    end
+    out = vals(:)';
+else
+    error('Unsupported epoch_window input type.');
+end
+
+if out(1) >= out(2)
+    error('epoch_window start must be < end. Got [%.6g %.6g].', out(1), out(2));
+end
+end
+
 function out = parse_optional_subject_filter(value)
 if isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0
     out = double(value);
@@ -673,7 +714,8 @@ end
 
 function triggers = normalize_trigger_list(value)
 if ischar(value) || (isstring(value) && isscalar(value))
-    parts = strsplit(char(value), ',');
+    cleaned = strrep(char(value), ';', ',');
+    parts = strsplit(cleaned, ',');
     triggers = cellfun(@strtrim, parts, 'UniformOutput', false);
 elseif isnumeric(value)
     triggers = arrayfun(@(x) num2str(x), value(:)', 'UniformOutput', false);

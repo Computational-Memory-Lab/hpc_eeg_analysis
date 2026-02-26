@@ -16,6 +16,7 @@
 #
 # Optional controls (all overrideable via sbatch --export):
 #   VOLTAGE_DIFF, VOLTAGE_ABS
+#   EPOCH_WINDOW           REQUIRED, epoch window in seconds (for example "-0.1;1.5")
 #   EPOCH_TRIGGERS_CSV      e.g., "11,21,22"
 #   EPOCH_GROUP_SPEC        e.g., "SME:11;Test_Intact:21;Test_Recombined:22"
 # Optional subject scoping (for SLURM arrays):
@@ -25,10 +26,16 @@
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/interpol}"
 VOLTAGE_DIFF="${VOLTAGE_DIFF:-20}"
 VOLTAGE_ABS="${VOLTAGE_ABS:-1000}"
+EPOCH_WINDOW="${EPOCH_WINDOW:-}"
 EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11,21,22}"
 EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC:-SME:11;Test_Intact:21;Test_Recombined:22}"
 SUBJECT_ID="${SUBJECT_ID:-}"
 SUBJECTS_FILE="${SUBJECTS_FILE:-}"
+
+if [[ -z "${EPOCH_WINDOW//[[:space:]]/}" ]]; then
+  echo "ERROR: EPOCH_WINDOW is required (for example -0.1;1.5)." >&2
+  exit 1
+fi
 
 if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   if [[ -z "${SUBJECTS_FILE}" ]]; then
@@ -48,10 +55,10 @@ if [[ -n "${SUBJECT_ID}" ]] && [[ ! "${SUBJECT_ID}" =~ ^[0-9]+$ ]]; then
 fi
 
 if [[ -n "${SUBJECT_ID}" ]]; then
-  MATLAB_CALL="hpc_interpol_to_epoch('${INPUT_FOLDER}', ${VOLTAGE_DIFF}, ${VOLTAGE_ABS}, '${EPOCH_TRIGGERS_CSV}', '${EPOCH_GROUP_SPEC}', ${SUBJECT_ID});"
+  MATLAB_CALL="hpc_interpol_to_epoch('${INPUT_FOLDER}', '${EPOCH_WINDOW}', ${VOLTAGE_DIFF}, ${VOLTAGE_ABS}, '${EPOCH_TRIGGERS_CSV}', '${EPOCH_GROUP_SPEC}', ${SUBJECT_ID});"
   echo "Running Stage 3 for subject ${SUBJECT_ID}"
 else
-  MATLAB_CALL="hpc_interpol_to_epoch('${INPUT_FOLDER}', ${VOLTAGE_DIFF}, ${VOLTAGE_ABS}, '${EPOCH_TRIGGERS_CSV}', '${EPOCH_GROUP_SPEC}');"
+  MATLAB_CALL="hpc_interpol_to_epoch('${INPUT_FOLDER}', '${EPOCH_WINDOW}', ${VOLTAGE_DIFF}, ${VOLTAGE_ABS}, '${EPOCH_TRIGGERS_CSV}', '${EPOCH_GROUP_SPEC}');"
   echo "Running Stage 3 for all subjects in ${INPUT_FOLDER}"
 fi
 

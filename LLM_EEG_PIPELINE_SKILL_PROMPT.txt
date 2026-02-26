@@ -62,6 +62,7 @@ The Skill should make the agent ask targeted questions, including:
 - If epoch ERP plots requested: trial_type labels to plot (e.g., Study_hits,Study_misses)
 - If epoch ERP plots requested: required channels to average and output folder/title overrides
 - If epoch ERP plots requested: optional time window(s) for stats/highlight (e.g., 300-500 ms or 300-500;600-800 ms)
+- If endpoint includes Stage 3 (epoching): REQUIRED EPOCH_WINDOW in seconds (for example -0.1;1.5). No default.
 - If second-level: condition labels to compare (e.g., Study_hits vs Study_misses)
 - If plots requested: output plot directory
 - If plots requested: whether to keep default Step 6 titles or use custom titles
@@ -76,6 +77,7 @@ The Skill should make the agent ask targeted questions, including:
 - Whether to use defaults or custom values for:
   - VOLTAGE_DIFF (default 20)
   - VOLTAGE_ABS (default 1000)
+  - EPOCH_WINDOW (required; no default)
   - EPOCH_TRIGGERS_CSV (default 11,21,22)
   - EPOCH_GROUP_SPEC (default SME:11;Test_Intact:21;Test_Recombined:22)
   - CONDITION_ORDER (default empty/infer)
@@ -128,12 +130,15 @@ Before submitting jobs, the agent should summarize:
 - detected start stage
 - target end stage
 - stages to run
-- key parameters (epoch triggers/group spec, condition order, contrast labels, output dirs)
+- key parameters (epoch window, epoch triggers/group spec, condition order, contrast labels, output dirs)
 Then ask for confirmation if anything is ambiguous.
 
 H) Post-submit monitoring guidance
 - Report submitted job IDs and dependency chain.
 - Offer squeue/sacct monitoring commands.
+- If Fir appears unresponsive (for example SSH/login/squeue hangs or repeated timeouts), check:
+  - https://status.alliancecan.ca/system/Fir/feed.rss
+  - summarize any active/recent incident before retrying jobs.
 - Identify expected output folders at each stage.
 
 ============================================================
@@ -150,7 +155,7 @@ Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
   - optional SUBJECT_ID (single-subject execution)
   - optional SUBJECTS_FILE + SLURM_ARRAY_TASK_ID (array execution)
 - hpc_interpol_to_epoch.slurm
-  - INPUT_FOLDER, VOLTAGE_DIFF, VOLTAGE_ABS, EPOCH_TRIGGERS_CSV, EPOCH_GROUP_SPEC
+  - INPUT_FOLDER, EPOCH_WINDOW (required), VOLTAGE_DIFF, VOLTAGE_ABS, EPOCH_TRIGGERS_CSV, EPOCH_GROUP_SPEC
   - optional SUBJECT_ID (single-subject execution)
   - optional SUBJECTS_FILE + SLURM_ARRAY_TASK_ID (array execution)
 - hpc_epoch_to_erp_plot.slurm

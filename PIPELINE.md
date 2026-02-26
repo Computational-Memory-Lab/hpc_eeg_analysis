@@ -113,13 +113,16 @@ Output:
 ### 3) Interpol -> Epoch
 
 ```matlab
-hpc_interpol_to_epoch(input_folder)
-hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold)
-hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
-hpc_interpol_to_epoch(input_folder, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
+hpc_interpol_to_epoch(input_folder, epoch_window)
+hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold)
+hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec)
+hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshold, voltage_abs_threshold, epoch_triggers, group_spec, subject_filter)
 ```
 
 Parameters:
+- `epoch_window`: REQUIRED `[start end]` window in seconds (no default)
+  - examples: `[-0.1 1.5]`, `'-0.1,1.5'`, `'-0.1 1.5'`, `'-0.1;1.5'`
+  - for `sbatch --export`, semicolon separator (`;`) is safer than comma
 - `epoch_triggers`: which trigger codes to epoch around (defines which trials are created), accepts cell/numeric/CSV
   - examples: `{'11','21','22'}` or `'11,21,22'`
 - `group_spec`: how already-epoched trials are grouped for artifact rejection thresholds/counting
@@ -247,7 +250,7 @@ For organized runs, override `--output` and `--error` at submission time.
   - optional subject scope: `SUBJECT_ID`
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_interpol_to_epoch.slurm`
-  - `INPUT_FOLDER`, `VOLTAGE_DIFF`, `VOLTAGE_ABS`, `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`
+  - `INPUT_FOLDER`, `EPOCH_WINDOW` (required), `VOLTAGE_DIFF`, `VOLTAGE_ABS`, `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`
   - optional subject scope: `SUBJECT_ID`
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_epoch_to_erp_plot.slurm`
@@ -280,7 +283,7 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 ```
 
 `submit_pipeline.sh` now supports:
-- configurable epoching (`EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
+- configurable epoching (`EPOCH_WINDOW` required, plus `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
 - optional explicit `CONDITION_ORDER`
 - optional Stage 4A ERP branch:
   - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)
