@@ -42,13 +42,18 @@ if nargin < 6
 else
     subject_filter = parse_optional_subject_filter(subject_filter);
 end
+input_folder = normalize_input_folder(input_folder);
 
 epoch_triggers = normalize_trigger_list(epoch_triggers);
 group_def = parse_group_spec(group_spec);
 condition_names = {'Study_hits', 'Study_misses', 'Test_hits', 'Test_misses', 'Correct_rejections', 'False_alarms'};
 
 % Create output folder and summary file path.
-epoch_folder = fullfile(input_folder, 'epoch');
+pipeline_root = fileparts(input_folder);
+if isempty(pipeline_root)
+    pipeline_root = pwd;
+end
+epoch_folder = fullfile(pipeline_root, 'epoch');
 if ~exist(epoch_folder, 'dir')
     mkdir(epoch_folder);
 end
@@ -893,4 +898,15 @@ condition1_bad = unique(bad_trials_condition1);
 condition2_bad = unique(bad_trials_condition2);
 bad_trials = unique([condition1_bad, condition2_bad]);
 clean_EEG = EEG;
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end

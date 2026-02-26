@@ -23,7 +23,7 @@
 #   LR_TITLE            Full custom LR title
 #   TOPOPLOT_LAYOUT     Topoplot layout type: 'grid' (default), 'zigzag', or 'line'
 # ============================================================
-INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch/limo_first_level/limo_second_level_test_hits_vs_test_misses}"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/limo_second_level_test_hits_vs_test_misses}"
 OUTPUT_DIR="${OUTPUT_DIR:-/home/devon7y/scratch/devon7y/plots}"
 TITLE_BASE="${TITLE_BASE:-}"
 CHANNEL_TIME_TITLE="${CHANNEL_TIME_TITLE:-}"

@@ -20,9 +20,9 @@
 #    P1, P2, CONTRAST_KEY (optional)
 #
 # Output will be written to:
-#   INPUT_FOLDER/limo_second_level_<CONTRAST_KEY>/
+#   <parent_of_INPUT_FOLDER>/limo_second_level_<CONTRAST_KEY>/
 # ============================================================
-INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch/limo_first_level}"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/limo_first_level}"
 P1="${P1:-3}"
 P2="${P2:-4}"
 C1_LABEL="${C1_LABEL:-}"

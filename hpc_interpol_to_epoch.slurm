@@ -12,7 +12,7 @@
 
 # ============================================================
 # INPUT: the interpol/ folder produced by hpc_set_to_interpol
-# Output will be written to: INPUT_FOLDER/epoch/
+# Output will be written to: <parent_of_INPUT_FOLDER>/epoch/
 #
 # Optional controls (all overrideable via sbatch --export):
 #   VOLTAGE_DIFF, VOLTAGE_ABS
@@ -22,7 +22,7 @@
 #   SUBJECT_ID=<numeric_id>
 #   SUBJECTS_FILE=<path_with_one_subject_id_per_line> + --array
 # ============================================================
-INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol}"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/interpol}"
 VOLTAGE_DIFF="${VOLTAGE_DIFF:-20}"
 VOLTAGE_ABS="${VOLTAGE_ABS:-1000}"
 EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11,21,22}"

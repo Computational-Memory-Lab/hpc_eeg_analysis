@@ -17,27 +17,27 @@ This pipeline now supports general experiments by using:
 raw_input_folder (contains *.raw, session *.log, *.eeglog)
   -> hpc_raw_to_set(raw_input_folder)
       outputs in: <parent>/initial_set/
-                  <parent>/initial_set/behavioral_set/
+                  <parent>/behavioral_set/
 
-<parent>/initial_set/behavioral_set/
+<parent>/behavioral_set/
   -> hpc_set_to_interpol(behavioral_set_folder)
-      output: behavioral_set_folder/interpol/
+      output: <parent>/interpol/
 
 .../interpol/
   -> hpc_interpol_to_epoch(interpol_folder, ...)
-      output: interpol_folder/epoch/
+      output: <parent>/epoch/
 
 .../epoch/
   -> (Branch A) hpc_epoch_to_erp_plot(epoch_folder, trial_type_values, ...)
-      output: epoch_folder/erp_plots/
+      output: <parent>/erp_plots/
 
 .../epoch/
   -> (Branch B) hpc_limo_first_level(epoch_folder, condition_order)
-      output: epoch_folder/limo_first_level/
+      output: <parent>/limo_first_level/
 
 .../limo_first_level/
   -> hpc_limo_second_level(first_level_folder, contrast, output_tag)
-      output: first_level_folder/limo_second_level_<output_tag>/
+      output: <parent>/limo_second_level_<output_tag>/
 
 .../limo_second_level_<output_tag>/
   -> hpc_limo_channel_time_plots(second_level_folder, output_dir)
@@ -91,10 +91,10 @@ Input:
 
 Outputs (under parent of `input_folder`):
 - `initial_set/<ID>.set`
-- `initial_set/behavioral_set/processed_<ID>.set`
-- `initial_set/behavioral_set/behavioral_<ID>.log`
-- `initial_set/behavioral_set/EEGevents_<ID>.txt`
-- `initial_set/behavioral_set/alignment_parameters_S<ID>.mat`
+- `behavioral_set/processed_<ID>.set`
+- `behavioral_set/behavioral_<ID>.log`
+- `behavioral_set/EEGevents_<ID>.txt`
+- `behavioral_set/alignment_parameters_S<ID>.mat`
 
 ### 2) Behavioral Set -> Interpol
 
@@ -104,11 +104,11 @@ hpc_set_to_interpol(input_folder, subject_filter)
 ```
 
 Input:
-- `initial_set/behavioral_set/`
+- `behavioral_set/`
 - optional `subject_filter` (numeric ID) to process one subject only
 
 Output:
-- `initial_set/behavioral_set/interpol/`
+- `interpol/`
 
 ### 3) Interpol -> Epoch
 
@@ -134,7 +134,7 @@ Behavior:
 - applies artifact rejection by groups defined in `group_spec`
 
 Output:
-- `interpol/epoch/<ID>_epoch.set`
+- `epoch/<ID>_epoch.set`
 
 ### 4A) Epoch -> ERP Grand Average Plot (Branch)
 
@@ -152,7 +152,7 @@ Inputs:
 - for `sbatch --export`, prefer semicolon separator (`;`) because commas also separate env vars
 - required `channels`: channel indices for averaging
   - accepts numeric vector or comma/semicolon/space-separated string (for `sbatch --export`, semicolon is safer)
-- optional `output_dir`: default `epoch/erp_plots`
+- optional `output_dir`: default `<parent_of_epoch>/erp_plots`
 - optional `figure_title`: full custom title
 - optional `time_window_ms`: one or more `[start end]` windows
   - examples: `'300-500'`, `'300-500;600-800'`, or `[300 500; 600 800]`
@@ -163,10 +163,10 @@ Inputs:
     - annotates per-window significance on the plot
 
 Outputs:
-- `epoch/erp_plots/grand_average_erp_<trial_types>.png`
-- `epoch/erp_plots/grand_average_erp_<trial_types>.svg`
-- `epoch/erp_plots/grand_average_erp_<trial_types>.mat`
-- `epoch/erp_plots/grand_average_erp_<trial_types>_stats_<timestamp>.txt`
+- `erp_plots/grand_average_erp_<trial_types>.png`
+- `erp_plots/grand_average_erp_<trial_types>.svg`
+- `erp_plots/grand_average_erp_<trial_types>.mat`
+- `erp_plots/grand_average_erp_<trial_types>_stats_<timestamp>.txt`
 
 ### 4B) LIMO First Level
 
@@ -180,10 +180,10 @@ hpc_limo_first_level(input_folder, condition_order)
 - if omitted/empty, inferred from `trial_type`
 
 Outputs:
-- `epoch/limo_first_level/PairAsso_Epoched.study`
-- `epoch/limo_first_level/derivatives/...`
-- `epoch/limo_first_level/condition_order.mat`
-- `epoch/limo_first_level/condition_order.txt`
+- `limo_first_level/PairAsso_Epoched.study`
+- `limo_first_level/derivatives/...`
+- `limo_first_level/condition_order.mat`
+- `limo_first_level/condition_order.txt`
 
 ### 5) LIMO Second Level
 
@@ -286,7 +286,7 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
   - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)
   - `TRIAL_TYPES_CSV` (comma/semicolon list; semicolon preferred)
   - `ERP_CHANNELS_CSV` (required when `RUN_EPOCH_ERP_BRANCH=1`)
-  - `ERP_OUTPUT_DIR` (empty => `epoch/erp_plots`)
+  - `ERP_OUTPUT_DIR` (empty => `erp_plots`)
   - `ERP_FIGURE_TITLE`
   - `ERP_TIME_WINDOW_MS` (optional window(s) for stats/highlight, example: `"300-500;600-800"`)
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)

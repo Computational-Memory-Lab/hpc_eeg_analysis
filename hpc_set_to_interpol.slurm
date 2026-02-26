@@ -12,12 +12,12 @@
 
 # ============================================================
 # INPUT: folder containing behavioral .set files to preprocess
-# Output will be written to: INPUT_FOLDER/interpol/
+# Output will be written to: <parent_of_INPUT_FOLDER>/interpol/
 # Optional subject scoping (for SLURM arrays):
 #   SUBJECT_ID=<numeric_id>
 #   SUBJECTS_FILE=<path_with_one_subject_id_per_line> + --array
 # ============================================================
-INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set}"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/behavioral_set}"
 SUBJECT_ID="${SUBJECT_ID:-}"
 SUBJECTS_FILE="${SUBJECTS_FILE:-}"
 

@@ -41,7 +41,7 @@ RUN_EPOCH_ERP_BRANCH="0"
 # safer because commas are also env separators.
 TRIAL_TYPES_CSV="Study_hits;Study_misses"
 ERP_CHANNELS_CSV=""  # required when RUN_EPOCH_ERP_BRANCH=1 (example: "21" or "21,22")
-ERP_OUTPUT_DIR=""     # empty => <EPOCH>/erp_plots
+ERP_OUTPUT_DIR=""     # empty => <PARENT_DIR>/erp_plots
 ERP_FIGURE_TITLE=""   # empty => default title from hpc_epoch_to_erp_plot.m
 ERP_TIME_WINDOW_MS="" # optional examples: "300-500" or "300-500;600-800"
 
@@ -58,12 +58,12 @@ COMPARISONS=(
 # ============================================================
 PARENT_DIR="$(dirname "${RAW_INPUT}")"
 INITIAL_SET="${PARENT_DIR}/initial_set"
-BEHAVIORAL_SET="${INITIAL_SET}/behavioral_set"
-INTERPOL="${BEHAVIORAL_SET}/interpol"
-EPOCH="${INTERPOL}/epoch"
-FIRST_LEVEL="${EPOCH}/limo_first_level"
+BEHAVIORAL_SET="${PARENT_DIR}/behavioral_set"
+INTERPOL="${PARENT_DIR}/interpol"
+EPOCH="${PARENT_DIR}/epoch"
+FIRST_LEVEL="${PARENT_DIR}/limo_first_level"
 if [[ -z "${ERP_OUTPUT_DIR}" ]]; then
-  ERP_OUTPUT_DIR="${EPOCH}/erp_plots"
+  ERP_OUTPUT_DIR="${PARENT_DIR}/erp_plots"
 fi
 MANIFEST_DIR="${PARENT_DIR}/pipeline_manifests"
 mkdir -p "${MANIFEST_DIR}"
@@ -229,7 +229,7 @@ echo "Submitted job4B (limo_first_level):          ${JOB4B}"
 declare -A JOB5
 for ITEM in "${COMPARISONS[@]}"; do
   IFS='|' read -r KEY C1 C2 TITLE <<< "${ITEM}"
-  SECOND_LEVEL_DIR="${FIRST_LEVEL}/limo_second_level_${KEY}"
+  SECOND_LEVEL_DIR="${PARENT_DIR}/limo_second_level_${KEY}"
   LOG_STAGE5_DIR="${SECOND_LEVEL_DIR}/logs/limo_second_level"
   mkdir -p "${LOG_STAGE5_DIR}"
 
@@ -249,7 +249,7 @@ done
 # ============================================================
 for ITEM in "${COMPARISONS[@]}"; do
   IFS='|' read -r KEY C1 C2 TITLE <<< "${ITEM}"
-  SECOND_LEVEL_DIR="${FIRST_LEVEL}/limo_second_level_${KEY}"
+  SECOND_LEVEL_DIR="${PARENT_DIR}/limo_second_level_${KEY}"
   LOG_STAGE6_DIR="${LOG_PLOTS_DIR}/${KEY}"
   mkdir -p "${LOG_STAGE6_DIR}"
 
@@ -280,7 +280,7 @@ if [[ "${RUN_EPOCH_ERP_BRANCH}" == "1" ]]; then
   echo "  stage4A: ${LOG_STAGE4A_DIR}"
 fi
 echo "  stage4B: ${LOG_STAGE4B_DIR}"
-echo "  stage5: ${FIRST_LEVEL}/limo_second_level_<key>/logs/limo_second_level"
+echo "  stage5: ${PARENT_DIR}/limo_second_level_<key>/logs/limo_second_level"
 echo "  stage6: ${LOG_PLOTS_DIR}"
 echo "Derived folders:"
 echo "  initial_set:    ${INITIAL_SET}"

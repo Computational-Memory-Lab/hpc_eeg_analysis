@@ -19,10 +19,10 @@ function hpc_raw_to_set(input_folder, subject_filter)
 %
 % Outputs (created under the parent directory of input_folder):
 %   - initial_set/<ID>.set
-%   - initial_set/behavioral_set/processed_<ID>.set
-%   - initial_set/behavioral_set/behavioral_<ID>.log
-%   - initial_set/behavioral_set/EEGevents_<ID>.txt
-%   - initial_set/behavioral_set/alignment_parameters_S<ID>.mat
+%   - behavioral_set/processed_<ID>.set
+%   - behavioral_set/behavioral_<ID>.log
+%   - behavioral_set/EEGevents_<ID>.txt
+%   - behavioral_set/alignment_parameters_S<ID>.mat
 
 if nargin < 1 || nargin > 2 || ~(ischar(input_folder) || (isstring(input_folder) && isscalar(input_folder)))
     error('Usage: hpc_raw_to_set(input_folder [, subject_filter])');
@@ -31,6 +31,7 @@ end
 if isstring(input_folder)
     input_folder = char(input_folder);
 end
+input_folder = normalize_input_folder(input_folder);
 
 if nargin < 2
     subject_filter = [];
@@ -58,7 +59,7 @@ if isempty(parent_folder)
 end
 
 initial_set_folder = fullfile(parent_folder, 'initial_set');
-behavioral_set_folder = fullfile(initial_set_folder, 'behavioral_set');
+behavioral_set_folder = fullfile(parent_folder, 'behavioral_set');
 
 if ~exist(initial_set_folder, 'dir')
     mkdir(initial_set_folder);
@@ -714,4 +715,15 @@ if (ischar(value) && ~isempty(strtrim(value))) || (isstring(value) && isscalar(v
 end
 
 error('subject_filter must be a finite integer subject ID.');
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end

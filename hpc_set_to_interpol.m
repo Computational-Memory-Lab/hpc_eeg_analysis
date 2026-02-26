@@ -11,8 +11,8 @@ function hpc_set_to_interpol(input_folder, subject_filter)
 %                    only that subject.
 %
 % Outputs:
-%   - <input_folder>/interpol/preprocessed_full_<ID>.set  Filtered and cleaned EEG datasets
-%   - <input_folder>/interpol/preprocessing_summary_<ID>.txt  Per-subject summary log
+%   - <parent_of_input_folder>/interpol/preprocessed_full_<ID>.set  Filtered and cleaned EEG datasets
+%   - <parent_of_input_folder>/interpol/preprocessing_summary_<ID>.txt  Per-subject summary log
 %
 % Processing Steps:
 %   1. Flatline removal: Remove broken electrodes
@@ -39,6 +39,7 @@ if nargin < 2
 else
     subject_filter = parse_optional_subject_filter(subject_filter);
 end
+input_folder = normalize_input_folder(input_folder);
 
 %% CHECK DEPENDENCIES
 if ~exist('pop_loadset', 'file')
@@ -85,7 +86,11 @@ if ~exist('pop_iclabel', 'file')
 end
 
 %% CREATE OUTPUT DIRECTORY
-interpol_folder = fullfile(input_folder, 'interpol');
+pipeline_root = fileparts(input_folder);
+if isempty(pipeline_root)
+    pipeline_root = pwd;
+end
+interpol_folder = fullfile(pipeline_root, 'interpol');
 if ~exist(interpol_folder, 'dir')
     mkdir(interpol_folder);
 end
@@ -473,4 +478,15 @@ if (ischar(value) && ~isempty(strtrim(value))) || (isstring(value) && isscalar(v
 end
 
 error('subject_filter must be a finite integer subject ID.');
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end

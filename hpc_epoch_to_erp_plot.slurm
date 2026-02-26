@@ -18,15 +18,16 @@
 #                  also used as env separators.
 # CHANNELS_CSV: required channel indices (comma/semicolon/space separated)
 #               examples: "21", "21,22", or "21;22"
-# OUTPUT_DIR: output folder for ERP plot files (default: INPUT_FOLDER/erp_plots)
+# OUTPUT_DIR: output folder for ERP plot files (default: <parent_of_INPUT_FOLDER>/erp_plots)
 # FIGURE_TITLE: optional full custom figure title
 # TIME_WINDOW_MS: optional time window(s) for stats/highlight
 #                 examples: "300-500" or "300-500;600-800"
 # ============================================================
-INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/initial_set/behavioral_set/interpol/epoch}"
+INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/epoch}"
 TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV:-Study_hits;Study_misses}"
 CHANNELS_CSV="${CHANNELS_CSV:-}"
-OUTPUT_DIR="${OUTPUT_DIR:-${INPUT_FOLDER}/erp_plots}"
+DEFAULT_ERP_OUTPUT_DIR="$(dirname "${INPUT_FOLDER}")/erp_plots"
+OUTPUT_DIR="${OUTPUT_DIR:-${DEFAULT_ERP_OUTPUT_DIR}}"
 FIGURE_TITLE="${FIGURE_TITLE:-}"
 TIME_WINDOW_MS="${TIME_WINDOW_MS:-}"
 

@@ -14,7 +14,7 @@
 # INPUT: folder containing subject .raw + session .log + .eeglog files
 # Output folders are created under the parent of INPUT_FOLDER:
 #   <parent_of_INPUT_FOLDER>/initial_set/
-#   <parent_of_INPUT_FOLDER>/initial_set/behavioral_set/
+#   <parent_of_INPUT_FOLDER>/behavioral_set/
 # Optional subject scoping (for SLURM arrays):
 #   SUBJECT_ID=<numeric_id>
 #   SUBJECTS_FILE=<path_with_one_subject_id_per_line> + --array

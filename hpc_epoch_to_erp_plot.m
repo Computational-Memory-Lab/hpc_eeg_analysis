@@ -13,7 +13,7 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %                       or cell array (e.g., {'Study_hits','Study_misses'}).
 %   channels          - Required channel indices.
 %                       Accepts numeric vector or CSV string (e.g., '21,22').
-%   output_dir        - Optional output folder (default: <input_folder>/erp_plots).
+%   output_dir        - Optional output folder (default: <parent_of_input_folder>/erp_plots).
 %   figure_title      - Optional custom figure title.
 %   time_window_ms    - Optional time windows (default: none).
 %                       Accepted formats:
@@ -34,8 +34,13 @@ end
 if nargin < 3 || isempty(channels)
     error('channels is required (numeric vector or CSV string).');
 end
+input_folder = normalize_input_folder(input_folder);
 if nargin < 4 || isempty(output_dir)
-    output_dir = fullfile(input_folder, 'erp_plots');
+    pipeline_root = fileparts(input_folder);
+    if isempty(pipeline_root)
+        pipeline_root = pwd;
+    end
+    output_dir = fullfile(pipeline_root, 'erp_plots');
 end
 if nargin < 5 || isempty(figure_title)
     figure_title = 'Grand Average ERP by trial_type';
@@ -313,6 +318,17 @@ if nargout > 0
     results.stats_by_window = stats_by_window;
 end
 
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end
 
 function labels = parse_trial_type_values(value)

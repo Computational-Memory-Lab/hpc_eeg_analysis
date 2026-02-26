@@ -83,7 +83,7 @@ The Skill should make the agent ask targeted questions, including:
 B) Determine start stage automatically from folder contents
 Use robust detection rules like:
 - Stage 1 input (raw): folder contains .raw and matching .log + .eeglog
-- Stage 2 input (behavioral set): folder contains processed_*.set (typically in initial_set/behavioral_set)
+- Stage 2 input (behavioral set): folder contains processed_*.set (typically in behavioral_set/)
 - Stage 3 input (interpol): folder contains preprocessed_full_*.set (typically in interpol/)
 - Stage 4A output candidate (ERP plots): folder contains grand_average_erp_*.mat
 - Stage 4 branching input (epoch): folder contains *_epoch.set (typically in epoch/)

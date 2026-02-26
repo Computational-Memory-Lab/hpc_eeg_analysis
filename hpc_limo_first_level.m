@@ -12,7 +12,7 @@ function hpc_limo_first_level(input_folder, condition_order)
 %                      Example: 'Study_hits,Study_misses,Test_hits,Test_misses'
 %
 % Outputs:
-%   - <input_folder>/limo_first_level/
+%   - <parent_of_input_folder>/limo_first_level/
 %   - condition_order.mat / condition_order.txt (label -> parameter mapping)
 
 % Start timing
@@ -31,6 +31,7 @@ if nargin >= 2 && ~isempty(condition_order)
 else
     condition_order = {};
 end
+input_folder = normalize_input_folder(input_folder);
 
 % Force headless MATLAB
 set(0, 'DefaultFigureVisible', 'off');
@@ -41,7 +42,11 @@ addpath('/home/devon7y/scratch/devon7y/eeglab2022.1');
 fprintf('Added EEGLAB to path\n');
 
 % Define directories
-output_dir = fullfile(input_folder, 'limo_first_level');
+pipeline_root = fileparts(input_folder);
+if isempty(pipeline_root)
+    pipeline_root = pwd;
+end
+output_dir = fullfile(pipeline_root, 'limo_first_level');
 if ~exist(output_dir, 'dir')
     mkdir(output_dir);
 end
@@ -225,6 +230,17 @@ fprintf('Elapsed:     %.2f seconds (%.2f minutes)\n', elapsed, elapsed / 60);
 fprintf('========================================\n');
 disp('Done.');
 
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end
 
 function out = parse_condition_order(value)

@@ -13,7 +13,7 @@ function hpc_limo_second_level(input_folder, contrast, output_tag)
 %   output_tag   - Optional folder suffix (e.g., 'study_hits_vs_study_misses')
 %
 % Outputs:
-%   - <input_folder>/limo_second_level_<output_tag>/
+%   - <parent_of_input_folder>/limo_second_level_<output_tag>/
 
 if nargin < 2 || isempty(contrast)
     error('Provide a contrast: numeric [p1 p2] or labels {''A'',''B''}.');
@@ -21,6 +21,7 @@ end
 if nargin < 3
     output_tag = '';
 end
+input_folder = normalize_input_folder(input_folder);
 
 is_numeric_contrast = isnumeric(contrast);
 if is_numeric_contrast
@@ -66,7 +67,11 @@ fprintf('Added EEGLAB to path\n');
 
 % Define directories
 limo_analysis_dir = input_folder;
-output_dir = fullfile(input_folder, sprintf('limo_second_level_%s', output_tag));
+pipeline_root = fileparts(input_folder);
+if isempty(pipeline_root)
+    pipeline_root = pwd;
+end
+output_dir = fullfile(pipeline_root, sprintf('limo_second_level_%s', output_tag));
 if ~exist(output_dir, 'dir')
     fprintf('Creating output directory: %s\n', output_dir);
     [success, msg] = mkdir(output_dir);
@@ -254,6 +259,17 @@ fprintf('========================================\n');
 fprintf('Output saved to: %s\n', output_dir);
 disp('Done.');
 
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
 end
 
 function labels = parse_contrast_labels(value)
