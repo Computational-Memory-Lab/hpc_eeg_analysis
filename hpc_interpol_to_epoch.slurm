@@ -17,7 +17,7 @@
 # Optional controls (all overrideable via sbatch --export):
 #   VOLTAGE_DIFF, VOLTAGE_ABS
 #   EPOCH_WINDOW           REQUIRED, epoch window in seconds (for example "-0.1;1.5")
-#   EPOCH_TRIGGERS_CSV      e.g., "11,21,22"
+#   EPOCH_TRIGGERS_CSV      e.g., "11;21;22" (semicolon preferred for sbatch --export)
 #   EPOCH_GROUP_SPEC        e.g., "SME:11;Test_Intact:21;Test_Recombined:22"
 # Optional subject scoping (for SLURM arrays):
 #   SUBJECT_ID=<numeric_id>
@@ -27,10 +27,15 @@ INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/interpol}"
 VOLTAGE_DIFF="${VOLTAGE_DIFF:-20}"
 VOLTAGE_ABS="${VOLTAGE_ABS:-1000}"
 EPOCH_WINDOW="${EPOCH_WINDOW:-}"
-EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11,21,22}"
+EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11;21;22}"
 EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC:-SME:11;Test_Intact:21;Test_Recombined:22}"
 SUBJECT_ID="${SUBJECT_ID:-}"
 SUBJECTS_FILE="${SUBJECTS_FILE:-}"
+
+# sbatch --export may pass escaped commas (\,); normalize back to plain values.
+EPOCH_WINDOW="${EPOCH_WINDOW//\\,/,}"
+EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV//\\,/,}"
+EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC//\\,/,}"
 
 if [[ -z "${EPOCH_WINDOW//[[:space:]]/}" ]]; then
   echo "ERROR: EPOCH_WINDOW is required (for example -0.1;1.5)." >&2

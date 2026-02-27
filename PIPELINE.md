@@ -124,7 +124,8 @@ Parameters:
   - examples: `[-0.1 1.5]`, `'-0.1,1.5'`, `'-0.1 1.5'`, `'-0.1;1.5'`
   - for `sbatch --export`, semicolon separator (`;`) is safer than comma
 - `epoch_triggers`: which trigger codes to epoch around (defines which trials are created), accepts cell/numeric/CSV
-  - examples: `{'11','21','22'}` or `'11,21,22'`
+  - examples: `{'11','21','22'}`, `'11,21,22'`, or `'11;21;22'`
+  - for `sbatch --export`, semicolon separator (`;`) is safer than comma
 - `group_spec`: how already-epoched trials are grouped for artifact rejection thresholds/counting
   - string form: `'SME:11;Test_Intact:21;Test_Recombined:22'`
   - cell form: `{'SME', {'11'}; 'Test', {'21','22'}}`
@@ -235,6 +236,17 @@ Output:
 
 ---
 
+## Manual Submission Preflight
+
+Before launching Stage 5 or Stage 6 manually, validate the actual upstream folder:
+
+- Stage 5 input must contain `*.study` and `derivatives/`.
+- Stage 6 input must contain `LIMO.mat` and `paired_samples_ttest_parameter_*.mat`.
+- Do not assume folder layout from memory; check with `ls`/`find` first.
+- If Stage 3 is launched with `sbatch --export`, prefer semicolon separators for `EPOCH_WINDOW` and `EPOCH_TRIGGERS_CSV`.
+
+---
+
 ## SLURM Scripts
 
 Each SLURM script accepts environment-variable overrides via `sbatch --export`.
@@ -251,6 +263,8 @@ For organized runs, override `--output` and `--error` at submission time.
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_interpol_to_epoch.slurm`
   - `INPUT_FOLDER`, `EPOCH_WINDOW` (required), `VOLTAGE_DIFF`, `VOLTAGE_ABS`, `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`
+  - `EPOCH_TRIGGERS_CSV` accepts comma or semicolon separators (semicolon preferred for `sbatch --export`)
+  - escaped commas from `sbatch --export` are normalized by the wrapper
   - optional subject scope: `SUBJECT_ID`
   - array mode: `SUBJECTS_FILE` + `--array`
 - `hpc_epoch_to_erp_plot.slurm`
@@ -262,6 +276,8 @@ For organized runs, override `--output` and `--error` at submission time.
 - `hpc_limo_second_level.slurm`
   - label mode: `C1_LABEL`, `C2_LABEL`, `CONTRAST_KEY`
   - numeric mode: `P1`, `P2`, `CONTRAST_KEY`
+  - wrapper validates/resolves `INPUT_FOLDER` to a real first-level folder containing `*.study` + `derivatives/`
+    - supports common layouts: `<run>/limo_first_level` and `<run>/epoch/limo_first_level`
 - `hpc_limo_channel_time_plots.slurm`
   - `INPUT_FOLDER`, `OUTPUT_DIR`
   - optional title overrides:
@@ -271,6 +287,8 @@ For organized runs, override `--output` and `--error` at submission time.
     - `LR_TITLE`
   - optional topoplot layout:
     - `TOPOPLOT_LAYOUT` = `grid` (default), `zigzag`, or `line`
+  - wrapper validates/resolves `INPUT_FOLDER` to a real second-level folder containing `LIMO.mat` + `paired_samples_ttest_parameter_*.mat`
+    - supports common layouts: `<run>/limo_second_level_<key>` and `<run>/epoch/limo_first_level/limo_second_level_<key>`
 
 ---
 
@@ -284,6 +302,8 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 
 `submit_pipeline.sh` now supports:
 - configurable epoching (`EPOCH_WINDOW` required, plus `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
+  - `EPOCH_TRIGGERS_CSV` default is semicolon-separated (`11;21;22`) to avoid `sbatch --export` CSV splitting
+  - commas in Stage 3 env values are escaped and normalized by wrappers
 - optional explicit `CONDITION_ORDER`
 - optional Stage 4A ERP branch:
   - `RUN_EPOCH_ERP_BRANCH` (`0` or `1`)

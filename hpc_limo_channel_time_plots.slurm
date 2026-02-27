@@ -16,6 +16,12 @@
 # INPUT_FOLDER: a limo_second_level_<contrast_key>/ folder
 # OUTPUT_DIR:   folder where .png files will be saved
 #
+# INPUT_FOLDER auto-resolution:
+#   If INPUT_FOLDER is not a second-level folder directly, this wrapper will
+#   try common layouts such as:
+#     <run>/limo_second_level_<contrast_key>
+#     <run>/epoch/limo_first_level/limo_second_level_<contrast_key>
+#
 # Optional title overrides:
 #   TITLE_BASE          Base contrast text used to build default titles
 #   CHANNEL_TIME_TITLE  Full custom channel-time title
@@ -30,6 +36,45 @@ CHANNEL_TIME_TITLE="${CHANNEL_TIME_TITLE:-}"
 TOPOPLOT_TITLE="${TOPOPLOT_TITLE:-}"
 LR_TITLE="${LR_TITLE:-}"
 TOPOPLOT_LAYOUT="${TOPOPLOT_LAYOUT:-grid}"
+
+has_second_level_artifacts() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  [[ -f "$dir/LIMO.mat" ]] || return 1
+  compgen -G "$dir/paired_samples_ttest_parameter_*.mat" > /dev/null || return 1
+  return 0
+}
+
+resolve_second_level_dir() {
+  local raw="$1"
+  local base parent
+  base="$(basename "$raw")"
+  parent="$(dirname "$raw")"
+  local candidates=(
+    "$raw"
+    "$raw/$base"
+    "$parent/$base"
+    "$parent/epoch/limo_first_level/$base"
+    "$parent/limo_first_level/$base"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if has_second_level_artifacts "$c"; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! RESOLVED_INPUT_FOLDER="$(resolve_second_level_dir "$INPUT_FOLDER")"; then
+  echo "ERROR: Could not resolve a valid second-level folder from INPUT_FOLDER=${INPUT_FOLDER}" >&2
+  echo "Expected LIMO.mat and paired_samples_ttest_parameter_*.mat in the same folder." >&2
+  echo "Tried common layouts such as <run>/limo_second_level_* and <run>/epoch/limo_first_level/limo_second_level_*." >&2
+  exit 1
+fi
+INPUT_FOLDER="$RESOLVED_INPUT_FOLDER"
+echo "Using second-level folder: ${INPUT_FOLDER}"
 
 module load matlab/2023b
 

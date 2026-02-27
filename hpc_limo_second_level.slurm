@@ -21,6 +21,12 @@
 #
 # Output will be written to:
 #   <parent_of_INPUT_FOLDER>/limo_second_level_<CONTRAST_KEY>/
+#
+# INPUT_FOLDER auto-resolution:
+#   If INPUT_FOLDER is not a first-level folder directly, this wrapper will
+#   try common layouts such as:
+#     <run>/limo_first_level
+#     <run>/epoch/limo_first_level
 # ============================================================
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/limo_first_level}"
 P1="${P1:-3}"
@@ -28,6 +34,44 @@ P2="${P2:-4}"
 C1_LABEL="${C1_LABEL:-}"
 C2_LABEL="${C2_LABEL:-}"
 CONTRAST_KEY="${CONTRAST_KEY:-}"
+
+has_first_level_artifacts() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  compgen -G "$dir/*.study" > /dev/null || return 1
+  [[ -d "$dir/derivatives" ]] || return 1
+  return 0
+}
+
+resolve_first_level_dir() {
+  local raw="$1"
+  local parent
+  parent="$(dirname "$raw")"
+  local candidates=(
+    "$raw"
+    "$raw/limo_first_level"
+    "$raw/epoch/limo_first_level"
+    "$parent/limo_first_level"
+    "$parent/epoch/limo_first_level"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if has_first_level_artifacts "$c"; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! RESOLVED_INPUT_FOLDER="$(resolve_first_level_dir "$INPUT_FOLDER")"; then
+  echo "ERROR: Could not resolve a valid first-level folder from INPUT_FOLDER=${INPUT_FOLDER}" >&2
+  echo "Expected a folder containing *.study and derivatives/." >&2
+  echo "Tried common layouts such as <run>/limo_first_level and <run>/epoch/limo_first_level." >&2
+  exit 1
+fi
+INPUT_FOLDER="$RESOLVED_INPUT_FOLDER"
+echo "Using first-level folder: ${INPUT_FOLDER}"
 
 if [[ -z "${CONTRAST_KEY}" ]]; then
   if [[ -n "${C1_LABEL}" && -n "${C2_LABEL}" ]]; then
