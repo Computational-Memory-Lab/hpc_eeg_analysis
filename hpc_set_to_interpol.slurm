@@ -5,7 +5,7 @@
 #SBATCH --error=/home/devon7y/scratch/devon7y/logs/%x_%j.err
 # Default log path above is a fallback.
 # Prefer passing --output/--error at sbatch time to stage-local logs folders.
-#SBATCH --time=12:00:00
+#SBATCH --time=30:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=128G
