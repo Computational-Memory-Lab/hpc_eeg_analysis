@@ -1,5 +1,5 @@
 function hpc_set_to_interpol(input_folder, subject_filter)
-% HPC_SET_TO_INTERPOL - Apply filtering and channel rejection to EEG data
+% HPC_SET_TO_INTERPOL - Apply filtering, channel rejection, and interpolation to EEG data
 %
 % Usage:
 %   hpc_set_to_interpol(input_folder)
@@ -20,12 +20,14 @@ function hpc_set_to_interpol(input_folder, subject_filter)
 %   3. Low-pass filter: 50 Hz cutoff
 %   4. Line noise removal: 60 Hz and 120 Hz (pop_cleanline)
 %   5. Kurtosis-based channel rejection: Z-score threshold = 2 SD
-%   6. RANSAC-based channel rejection: Correlation threshold = 0.8
-%   7. ICA decomposition: Extended Infomax ICA (runica)
-%   8. IC classification: ICLabel deep learning classifier
-%   9. IC rejection: Remove artifact components (Eye>90%, Muscle>90%, Heart>90%)
-%   10. ASR: Artifact Subspace Reconstruction, cutoff = 20 SD
-%   11. Bad window removal: CURRENTLY DISABLED
+%   6. Load template channel locations for surviving channels
+%   7. RANSAC-based channel rejection: Correlation threshold = 0.8
+%   8. ICA decomposition: Extended Infomax ICA (runica)
+%   9. IC classification: ICLabel deep learning classifier
+%   10. IC rejection: Remove artifact components (Eye>90%, Muscle>90%, Heart>90%)
+%   11. ASR: Artifact Subspace Reconstruction, cutoff = 20 SD
+%   12. Channel interpolation: Reconstruct removed channels (spherical)
+%   13. Re-reference: Average reference
 %
 % NOTE: EEGLAB should be loaded by the SLURM script before calling this function
 %   (via: eeglab nogui; in the matlab -r command)
@@ -78,11 +80,23 @@ end
 if ~exist('clean_asr', 'file')
     error('clean_asr not found. You need to install the clean_rawdata plugin.');
 end
-if ~exist('clean_windows', 'file')
-    error('clean_windows not found. You need to install the clean_rawdata plugin.');
-end
 if ~exist('pop_iclabel', 'file')
     error('ICLabel plugin not found. Install ICLabel for IC classification.');
+end
+if ~exist('pop_interp', 'file')
+    error('pop_interp not found. Ensure EEGLAB interpolation functions are available.');
+end
+if ~exist('pop_reref', 'file')
+    error('pop_reref not found. Ensure EEGLAB rereferencing functions are available.');
+end
+
+chanlocs_file = '/home/devon7y/scratch/devon7y/devon_preprocessing/New_Received2025_AdultAverageNet256_v1.sfp';
+if ~exist(chanlocs_file, 'file')
+    error('Channel locations file not found: %s', chanlocs_file);
+end
+all_chanlocs = readlocs(chanlocs_file, 'filetype', 'sfp');
+if isempty(all_chanlocs)
+    error('No channel locations loaded from: %s', chanlocs_file);
 end
 
 %% CREATE OUTPUT DIRECTORY
@@ -162,10 +176,15 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Sampling rate: %d Hz\n', EEG.srate);
     fprintf('  Events: %d\n\n', length(EEG.event));
 
+    if length(all_chanlocs) < EEG.nbchan
+        error('Channel location file has %d channels but dataset has %d', length(all_chanlocs), EEG.nbchan);
+    end
+
     %% REMOVE FLATLINED CHANNELS
     fprintf('STEP 2: Removing flatlined channels (broken electrodes)...\n');
 
     initial_channels = EEG.nbchan;
+    original_channel_indices = 1:initial_channels;
     flatline_threshold = 5 * EEG.srate; % 5 seconds in samples
     bad_channels = [];
 
@@ -193,6 +212,7 @@ for file_idx = 1:length(files_to_process)
     if removed_flat > 0
         fprintf('  Detected %d flatlined channel(s): %s\n', removed_flat, mat2str(bad_channels));
         EEG = pop_select(EEG, 'nochannel', bad_channels);
+        original_channel_indices = remove_index_positions(original_channel_indices, bad_channels);
         fprintf('  Removed %d flatlined channel(s)\n', removed_flat);
     else
         fprintf('  No flatlined channels detected\n');
@@ -233,29 +253,22 @@ for file_idx = 1:length(files_to_process)
     if removed_kurt > 0
         fprintf('  Removed %d channel(s) based on kurtosis\n', removed_kurt);
         fprintf('  Removed channel indices: %s\n', mat2str(removed_kurt_idx));
+        original_channel_indices = remove_index_positions(original_channel_indices, removed_kurt_idx);
     else
         fprintf('  No channels removed\n');
     end
     fprintf('  Remaining channels: %d\n', EEG.nbchan);
     fprintf('  DEBUG: EEG.nbchan=%d, length(EEG.chanlocs)=%d\n\n', EEG.nbchan, length(EEG.chanlocs));
 
-    %% LOAD CHANNEL LOCATIONS (after channel removal to avoid mismatch)
+    %% LOAD CHANNEL LOCATIONS (aligned to surviving original channel indices)
     fprintf('STEP 7: Loading channel locations...\n');
-    chanlocs_file = '/home/devon7y/scratch/devon7y/devon_preprocessing/New_Received2025_AdultAverageNet256_v1.sfp';
-
-    if ~exist(chanlocs_file, 'file')
-        error('Channel locations file not found: %s', chanlocs_file);
+    if numel(original_channel_indices) ~= EEG.nbchan
+        error('Channel index tracking mismatch before chanloc assignment: tracked=%d, EEG.nbchan=%d', ...
+            numel(original_channel_indices), EEG.nbchan);
     end
-
-    all_chanlocs = readlocs(chanlocs_file, 'filetype', 'sfp');
-    fprintf('  Read %d channel locations from file\n', length(all_chanlocs));
-
-    if length(all_chanlocs) >= EEG.nbchan
-        EEG.chanlocs = all_chanlocs(1:EEG.nbchan);
-        fprintf('  Assigned first %d channel locations to dataset\n', EEG.nbchan);
-    else
-        error('Channel location file has %d channels but dataset has %d', length(all_chanlocs), EEG.nbchan);
-    end
+    EEG.chanlocs = all_chanlocs(original_channel_indices);
+    fprintf('  Loaded %d template channel locations\n', length(all_chanlocs));
+    fprintf('  Assigned location subset for %d surviving channels\n', EEG.nbchan);
 
     num_chans_with_locs = 0;
     for ch = 1:EEG.nbchan
@@ -294,6 +307,7 @@ for file_idx = 1:length(files_to_process)
         if ~isempty(removed_ransac_idx)
             fprintf('  Removed channel indices: %s\n', mat2str(removed_ransac_idx));
         end
+        original_channel_indices = remove_index_positions(original_channel_indices, removed_ransac_idx);
     else
         fprintf('  No channels removed\n');
     end
@@ -379,13 +393,27 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Data RMS change: %.2f%%\n', percent_changed);
     fprintf('  Channels preserved: %d\n\n', EEG.nbchan);
 
-    %% REMOVE BAD TIME WINDOWS - SKIPPED FOR NOW
-    % NOTE: This step is currently disabled because removing time windows creates
-    % discontinuities in the data. Enable for epoched/trial-based analyses.
-    fprintf('STEP 13: Skipped (bad window removal disabled - see comments)\n\n');
+    %% INTERPOLATE REMOVED CHANNELS BACK TO FULL MONTAGE
+    fprintf('STEP 13: Interpolating removed channels (spherical)...\n');
+    channels_before_interp = EEG.nbchan;
+    channels_interpolated = 0;
+    if channels_before_interp < initial_channels
+        EEG = pop_interp(EEG, all_chanlocs(1:initial_channels), 'spherical');
+        channels_interpolated = EEG.nbchan - channels_before_interp;
+        fprintf('  Interpolated %d channel(s)\n', channels_interpolated);
+        fprintf('  Restored channels: %d -> %d\n', channels_before_interp, EEG.nbchan);
+    else
+        fprintf('  No interpolation needed (no channels removed)\n');
+    end
+    fprintf('\n');
+
+    %% RE-REFERENCE TO AVERAGE REFERENCE
+    fprintf('STEP 14: Re-referencing to average reference...\n');
+    EEG = pop_reref(EEG, []);
+    fprintf('  Complete\n\n');
 
     %% SAVE DATASET
-    fprintf('STEP 14: Saving preprocessed dataset...\n');
+    fprintf('STEP 15: Saving preprocessed dataset...\n');
     EEG.setname = sprintf('preprocessed_full_%d', subject_id);
     EEG = pop_saveset(EEG, 'filename', output_filename, 'filepath', interpol_folder);
     fprintf('  Saved: %s\n\n', output_filename);
@@ -403,12 +431,14 @@ for file_idx = 1:length(files_to_process)
         sprintf('  Flatlined channels:      %d removed', removed_flat);
         sprintf('  Kurtosis rejection:      %d removed', removed_kurt);
         sprintf('  RANSAC rejection:        %d removed', removed_ransac);
+        sprintf('  Interpolated channels:   %d restored', channels_interpolated);
         sprintf('  Final channels:          %d', EEG.nbchan);
         '';
         '  Filters applied:';
         '    High-pass:             0.1 Hz';
         '    Low-pass:              50 Hz';
         '    Line noise removed:    60 Hz, 120 Hz';
+        '    Reference:             Average reference';
         '';
         '  ICA decomposition:';
         '    Method:                Extended Infomax (runica)';
@@ -417,7 +447,6 @@ for file_idx = 1:length(files_to_process)
         sprintf('    Retained ICs:          %d', size(EEG.icaweights, 1));
         '';
         sprintf('  ASR correction:          %.2f%% RMS change', percent_changed);
-        '  Time windows removed:    NONE (step disabled)';
         '';
         sprintf('  Final duration:          %.2f seconds', EEG.pnts / EEG.srate);
         sprintf('  Events preserved:        %d', length(EEG.event));
@@ -461,6 +490,25 @@ end
 fprintf('Output folder: %s\n', interpol_folder);
 fprintf('==============================================\n\n');
 
+end
+
+function out = remove_index_positions(vector_in, positions_to_remove)
+out = vector_in;
+if isempty(positions_to_remove)
+    return;
+end
+
+if islogical(positions_to_remove)
+    remove_idx = find(positions_to_remove);
+else
+    remove_idx = unique(round(double(positions_to_remove(:)')));
+end
+
+remove_idx = remove_idx(isfinite(remove_idx) & remove_idx >= 1 & remove_idx <= numel(out));
+if isempty(remove_idx)
+    return;
+end
+out(remove_idx) = [];
 end
 
 function out = parse_optional_subject_filter(value)
