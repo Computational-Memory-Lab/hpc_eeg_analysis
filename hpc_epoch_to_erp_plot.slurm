@@ -22,6 +22,8 @@
 # FIGURE_TITLE: optional full custom figure title
 # TIME_WINDOW_MS: optional time window(s) for stats/highlight
 #                 examples: "300-500" or "300-500;600-800"
+# SHOW_ERROR_BARS: optional boolean for within-subject SEM shading
+#                  accepted: true/false, 1/0, yes/no, on/off (default: true)
 # ============================================================
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/epoch}"
 TRIAL_TYPES_CSV="${TRIAL_TYPES_CSV:-Study_hits;Study_misses}"
@@ -30,6 +32,7 @@ DEFAULT_ERP_OUTPUT_DIR="$(dirname "${INPUT_FOLDER}")/erp_plots"
 OUTPUT_DIR="${OUTPUT_DIR:-${DEFAULT_ERP_OUTPUT_DIR}}"
 FIGURE_TITLE="${FIGURE_TITLE:-}"
 TIME_WINDOW_MS="${TIME_WINDOW_MS:-}"
+SHOW_ERROR_BARS="${SHOW_ERROR_BARS:-true}"
 
 if [[ -z "${CHANNELS_CSV//[[:space:]]/}" ]]; then
   echo "ERROR: CHANNELS_CSV is required (example: 21 or 21,22)." >&2
@@ -41,5 +44,5 @@ module load matlab/2023b
 matlab -nodisplay -nosplash -r "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_epoch_to_erp_plot('${INPUT_FOLDER}', '${TRIAL_TYPES_CSV}', '${CHANNELS_CSV}', '${OUTPUT_DIR}', getenv('FIGURE_TITLE'), getenv('TIME_WINDOW_MS')); \
+hpc_epoch_to_erp_plot('${INPUT_FOLDER}', '${TRIAL_TYPES_CSV}', '${CHANNELS_CSV}', '${OUTPUT_DIR}', getenv('FIGURE_TITLE'), getenv('TIME_WINDOW_MS'), getenv('SHOW_ERROR_BARS')); \
 exit;"
