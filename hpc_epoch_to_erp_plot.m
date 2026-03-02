@@ -179,6 +179,10 @@ participants_per_condition = zeros(1, n_conditions);
 for c = 1:n_conditions
     participants_per_condition(c) = sum(trial_counts(:, c) > 0);
 end
+legend_n_values = participants_per_condition;
+if n_subjects == 1
+    legend_n_values = trial_counts(1, :);
+end
 
 n_windows = size(time_windows_ms, 1);
 window_indices = cell(n_windows, 1);
@@ -278,7 +282,7 @@ for ch = 1:n_channels_to_plot
         line_handle = plot(time_vector, curve_data, 'Color', colors(c, :), 'LineWidth', 2.2);
         line_handles(end+1) = line_handle; %#ok<AGROW>
         plotted_curves(end+1, :) = curve_data; %#ok<AGROW>
-        legend_entries{end+1} = sprintf('%s (n=%d)', trial_type_display_values{c}, participants_per_condition(c)); %#ok<AGROW>
+        legend_entries{end+1} = sprintf('%s (n=%d)', trial_type_display_values{c}, legend_n_values(c)); %#ok<AGROW>
         plotted_any = true;
     end
 
@@ -317,7 +321,7 @@ for ch = 1:n_channels_to_plot
 
     xlabel(xlabel_text);
     ylabel('Voltage (\muV)');
-    title(compose_plot_title(figure_title, channel_in_use), 'Interpreter', 'none');
+    title(compose_plot_title(figure_title, channel_in_use, n_subjects == 1), 'Interpreter', 'none');
     legend_handle = legend(line_handles, legend_entries, 'Location', 'northeast', 'Interpreter', 'none');
     adjust_ylim_for_legend_clearance(gca, legend_handle, time_vector, plotted_curves);
     if ~isempty(window_patches)
@@ -997,8 +1001,15 @@ end
 out = strjoin(words, ' ');
 end
 
-function out = compose_plot_title(base_title, channels_in_use)
+function out = compose_plot_title(base_title, channels_in_use, is_single_subject)
+if nargin < 3
+    is_single_subject = false;
+end
+
 base_title = normalize_figure_title_text(base_title);
+if is_single_subject && isempty(regexpi(base_title, '\(Single Subject\)', 'once'))
+    base_title = sprintf('%s (Single Subject)', base_title);
+end
 electrode_text = format_electrode_text(channels_in_use);
 if isempty(electrode_text)
     out = base_title;
