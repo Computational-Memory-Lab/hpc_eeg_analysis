@@ -108,6 +108,7 @@ subject_ids = cell(n_subjects, 1);
 trial_counts = zeros(n_subjects, n_conditions);
 
 all_data_by_condition = cell(n_conditions, 1);
+single_subject_trial_sem_by_condition = cell(n_conditions, 1);
 time_vector = [];
 xlabel_text = 'Time (ms)';
 channels_in_use = [];
@@ -132,6 +133,9 @@ for i = 1:n_subjects
 
         for c = 1:n_conditions
             all_data_by_condition{c} = nan(numel(channels_in_use), n_timepoints, n_subjects);
+            if n_subjects == 1
+                single_subject_trial_sem_by_condition{c} = nan(numel(channels_in_use), n_timepoints);
+            end
         end
     else
         this_n_time = size(EEG.data, 2);
@@ -158,6 +162,15 @@ for i = 1:n_subjects
         if ~isempty(matching_epochs)
             participant_mean = mean(EEG.data(channels_in_use, :, matching_epochs), 3);
             all_data_by_condition{c}(:, :, i) = participant_mean;
+
+            if n_subjects == 1
+                if numel(matching_epochs) >= 2
+                    trial_data = EEG.data(channels_in_use, :, matching_epochs);
+                    single_subject_trial_sem_by_condition{c} = std(trial_data, 0, 3, 'omitnan') ./ sqrt(numel(matching_epochs));
+                else
+                    single_subject_trial_sem_by_condition{c} = nan(numel(channels_in_use), n_timepoints);
+                end
+            end
         end
     end
 end
@@ -223,7 +236,17 @@ for ch = 1:n_channels_to_plot
     plotted_any = false;
     plotted_curves = [];
     if show_error_bars
-        within_subject_sem_by_condition = compute_within_subject_sem_by_condition(channel_data_by_condition);
+        single_subject_trial_sem_for_channel = cell(n_conditions, 1);
+        if n_subjects == 1
+            for c = 1:n_conditions
+                sem_matrix = single_subject_trial_sem_by_condition{c};
+                if ~isempty(sem_matrix) && size(sem_matrix, 1) >= ch
+                    single_subject_trial_sem_for_channel{c} = sem_matrix(ch, :);
+                end
+            end
+        end
+        within_subject_sem_by_condition = compute_within_subject_sem_by_condition( ...
+            channel_data_by_condition, single_subject_trial_sem_for_channel);
     else
         within_subject_sem_by_condition = cell(n_conditions, 1);
     end
@@ -649,11 +672,15 @@ for s = 1:n_subjects_local
 end
 end
 
-function sem_by_condition = compute_within_subject_sem_by_condition(channel_data_by_condition)
+function sem_by_condition = compute_within_subject_sem_by_condition(channel_data_by_condition, single_subject_trial_sem_by_condition)
 n_conditions_local = numel(channel_data_by_condition);
 sem_by_condition = cell(n_conditions_local, 1);
 if n_conditions_local == 0
     return;
+end
+
+if nargin < 2 || isempty(single_subject_trial_sem_by_condition)
+    single_subject_trial_sem_by_condition = cell(n_conditions_local, 1);
 end
 
 first_data = channel_data_by_condition{1};
@@ -689,6 +716,28 @@ for c = 1:n_conditions_local
     end
 
     cond_values(:, c, :) = values;
+end
+
+if n_subjects_local == 1
+    for c = 1:n_conditions_local
+        sem = [];
+        if numel(single_subject_trial_sem_by_condition) >= c
+            sem = single_subject_trial_sem_by_condition{c};
+        end
+
+        if isempty(sem)
+            sem = nan(1, n_timepoints_local);
+        else
+            sem = squeeze(sem);
+            sem = sem(:)';
+            if numel(sem) ~= n_timepoints_local
+                sem = nan(1, n_timepoints_local);
+            end
+        end
+
+        sem_by_condition{c} = sem;
+    end
+    return;
 end
 
 if n_conditions_local == 1

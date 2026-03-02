@@ -147,6 +147,7 @@ hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
 ```
 
 Inputs:
@@ -154,8 +155,9 @@ Inputs:
 - `trial_type_values`: labels to plot, accepts comma/semicolon list, string-array, or cell
   - examples: `{'Study_hits','Study_misses'}`, `'Study_hits,Study_misses'`, or `'Study_hits;Study_misses'`
 - for `sbatch --export`, prefer semicolon separator (`;`) because commas also separate env vars
-- required `channels`: channel indices for averaging
+- required `channels`: channel indices to plot
   - accepts numeric vector or comma/semicolon/space-separated string (for `sbatch --export`, semicolon is safer)
+  - if multiple channels are provided, the function produces one ERP figure per channel
 - optional `output_dir`: default `<parent_of_epoch>/erp_plots`
 - optional `figure_title`: full custom title
 - optional `time_window_ms`: one or more `[start end]` windows
@@ -163,14 +165,25 @@ Inputs:
   - when provided and exactly two conditions are requested:
     - the function computes subject-level mean voltage in each window for each condition
     - runs a paired t-test between the two condition window means (per window)
+    - if only one subject has valid paired condition data, it falls back to a within-subject paired t-test across channel-time samples in the selected window
     - highlights each selected window on the ERP plot
     - annotates per-window significance on the plot
+- optional `show_error_bars`: default `true`
+  - accepts logical values (`true/false`, `1/0`, `yes/no`, `on/off`)
+  - when `true`, plots basic within-subject SEM shading per condition
+  - for single-subject runs, SEM shading falls back to trial-level SEM per condition/channel/timepoint
 
 Outputs:
-- `erp_plots/grand_average_erp_<trial_types>.png`
-- `erp_plots/grand_average_erp_<trial_types>.svg`
-- `erp_plots/grand_average_erp_<trial_types>.mat`
-- `erp_plots/grand_average_erp_<trial_types>_stats_<timestamp>.txt`
+- if one channel is requested:
+  - `erp_plots/grand_average_erp_<trial_types>.png`
+  - `erp_plots/grand_average_erp_<trial_types>.svg`
+  - `erp_plots/grand_average_erp_<trial_types>.mat`
+  - `erp_plots/grand_average_erp_<trial_types>_stats_<timestamp>.txt`
+- if multiple channels are requested:
+  - `erp_plots/grand_average_erp_<trial_types>_E<channel>.png`
+  - `erp_plots/grand_average_erp_<trial_types>_E<channel>.svg`
+  - `erp_plots/grand_average_erp_<trial_types>_E<channel>.mat`
+  - `erp_plots/grand_average_erp_<trial_types>_E<channel>_stats_<timestamp>.txt`
 
 ### 4B) LIMO First Level
 
@@ -270,7 +283,7 @@ For organized runs, override `--output` and `--error` at submission time.
 - `hpc_epoch_to_erp_plot.slurm`
   - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`, `CHANNELS_CSV`
     - `TRIAL_TYPES_CSV` supports comma/semicolon separators (semicolon preferred for `sbatch --export`)
-  - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`
+  - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`, `SHOW_ERROR_BARS`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
 - `hpc_limo_second_level.slurm`
@@ -312,6 +325,7 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
   - `ERP_OUTPUT_DIR` (empty => `erp_plots`)
   - `ERP_FIGURE_TITLE`
   - `ERP_TIME_WINDOW_MS` (optional window(s) for stats/highlight, example: `"300-500;600-800"`)
+  - `ERP_SHOW_ERROR_BARS` (optional; default `true`; accepts true/false, 1/0, yes/no, on/off)
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)
 - subject-manifest generation from `RAW_INPUT/*.raw`
 - Stage 1-3 submission as SLURM arrays (`--array`) with throttles:
