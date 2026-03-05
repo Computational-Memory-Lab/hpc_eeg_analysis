@@ -28,6 +28,7 @@
 #   TOPOPLOT_TITLE      Full custom topoplot title
 #   LR_TITLE            Full custom LR title
 #   TOPOPLOT_LAYOUT     Topoplot layout type: 'grid' (default), 'zigzag', or 'line'
+#   TOPOPLOT_STEP_MS    Topoplot interval in ms (default: 100)
 # ============================================================
 INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/limo_second_level_test_hits_vs_test_misses}"
 OUTPUT_DIR="${OUTPUT_DIR:-/home/devon7y/scratch/devon7y/plots}"
@@ -36,6 +37,7 @@ CHANNEL_TIME_TITLE="${CHANNEL_TIME_TITLE:-}"
 TOPOPLOT_TITLE="${TOPOPLOT_TITLE:-}"
 LR_TITLE="${LR_TITLE:-}"
 TOPOPLOT_LAYOUT="${TOPOPLOT_LAYOUT:-grid}"
+TOPOPLOT_STEP_MS="${TOPOPLOT_STEP_MS:-100}"
 
 has_second_level_artifacts() {
   local dir="$1"
@@ -86,5 +88,5 @@ matlab -nodisplay -nosplash -r "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1/plugins/limo_tools-3.4/'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_limo_channel_time_plots('${INPUT_FOLDER}', '${OUTPUT_DIR}', getenv('TITLE_BASE'), getenv('CHANNEL_TIME_TITLE'), getenv('TOPOPLOT_TITLE'), getenv('LR_TITLE'), getenv('TOPOPLOT_LAYOUT')); \
+hpc_limo_channel_time_plots('${INPUT_FOLDER}', '${OUTPUT_DIR}', getenv('TITLE_BASE'), getenv('CHANNEL_TIME_TITLE'), getenv('TOPOPLOT_TITLE'), getenv('LR_TITLE'), getenv('TOPOPLOT_LAYOUT'), getenv('TOPOPLOT_STEP_MS')); \
 exit;"

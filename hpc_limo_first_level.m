@@ -39,7 +39,9 @@ java.lang.System.setProperty('java.awt.headless', 'true');
 
 % Add EEGLAB to path
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1');
+addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis');
 fprintf('Added EEGLAB to path\n');
+configure_eeglab_offline_mode();
 
 % Define directories
 pipeline_root = fileparts(input_folder);
@@ -58,9 +60,16 @@ fprintf('Output folder: %s\n', output_dir);
 try
     eeglab nogui;
 catch ME
-    disp('EEGLAB failed to start:');
+    fprintf('EEGLAB startup failed on first attempt; retrying in offline mode...\n');
     disp(getReport(ME));
-    return;
+    configure_eeglab_offline_mode();
+    try
+        eeglab nogui;
+    catch ME2
+        disp('EEGLAB failed to start:');
+        disp(getReport(ME2));
+        return;
+    end
 end
 
 % Disable EEGLAB online checks
@@ -230,6 +239,19 @@ fprintf('Elapsed:     %.2f seconds (%.2f minutes)\n', elapsed, elapsed / 60);
 fprintf('========================================\n');
 disp('Done.');
 
+end
+
+function configure_eeglab_offline_mode()
+% Keep EEGLAB from querying remote plugin/update metadata.
+setenv('EEGLAB_NO_UPDATE', '1');
+setenv('HTTP_PROXY', '');
+setenv('HTTPS_PROXY', '');
+setenv('http_proxy', '');
+setenv('https_proxy', '');
+
+setpref('Internet', 'EeglabServerCheck', 'off');
+setpref('Internet', 'EeglabUpdateServer', 'off');
+setpref('Internet', 'EeglabPluginlistURL', 'off');
 end
 
 function out = normalize_input_folder(path_in)

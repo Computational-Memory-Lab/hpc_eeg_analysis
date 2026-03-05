@@ -1,4 +1,4 @@
-function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
+function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
 % HPC_EPOCH_TO_ERP_PLOT - Plot grand-average ERP curves by trial_type.
 %
 % Usage:
@@ -7,6 +7,8 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title)
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
+%   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions)
+%   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
 %
 % Inputs:
 %   input_folder      - Path to epoch folder containing *_epoch.set files.
@@ -24,6 +26,12 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %                       are run on subject-level average voltage per window.
 %   show_error_bars   - Optional logical toggle for within-subject SEM shading
 %                       (default: true). Accepts true/false, 1/0, yes/no, on/off.
+%   plot_dimensions   - Optional figure position vector [left bottom width height]
+%                       (default: [100 100 1200 700]).
+%   x_axis_range_ms   - Optional x-axis range in ms (default: full data range).
+%                       Accepted formats:
+%                       - [start end], 'start-end', 'start,end', 'start end'
+%                       - scalar duration in ms (e.g., 800 => [data_start, data_start+800])
 %
 % Outputs:
 %   - If one channel: same as before
@@ -56,12 +64,19 @@ end
 if nargin < 7
     show_error_bars = true;
 end
+if nargin < 8
+    plot_dimensions = [100 100 1200 700];
+end
+if nargin < 9
+    x_axis_range_ms = [];
+end
 
 trial_type_values = parse_trial_type_values(trial_type_values);
 trial_type_display_values = cellfun(@format_display_label, trial_type_values, 'UniformOutput', false);
 channels = parse_channel_list(channels);
 time_windows_ms = parse_time_windows(time_window_ms);
 show_error_bars = parse_logical_flag(show_error_bars, 'show_error_bars', true);
+plot_dimensions = parse_plot_dimensions(plot_dimensions, [100 100 1200 700]);
 figure_title = normalize_figure_title_text(figure_title);
 
 fprintf('\n==============================================\n');
@@ -72,6 +87,8 @@ fprintf('Trial types:    %s\n', strjoin(trial_type_values, ', '));
 fprintf('Channels:       %s\n', num2str(channels));
 fprintf('Output folder:  %s\n', output_dir);
 fprintf('Error bars:     %s\n', logical_to_onoff(show_error_bars));
+fprintf('Plot dims:      [%.0f %.0f %.0f %.0f]\n', plot_dimensions);
+fprintf('X-axis range:   %s\n', describe_x_axis_range_request(x_axis_range_ms));
 if ~isempty(time_windows_ms)
     fprintf('Time windows:\n');
     for w = 1:size(time_windows_ms, 1)
@@ -196,6 +213,12 @@ for w = 1:n_windows
     window_indices{w} = idx;
     resolved_time_windows(w, :) = resolved_window;
 end
+resolved_x_axis_range_ms = resolve_x_axis_limits(time_vector, x_axis_range_ms);
+if isempty(resolved_x_axis_range_ms)
+    fprintf('Resolved x-axis: full data range (%.3f to %.3f ms)\n', min(time_vector), max(time_vector));
+else
+    fprintf('Resolved x-axis: %.3f to %.3f ms\n', resolved_x_axis_range_ms(1), resolved_x_axis_range_ms(2));
+end
 
 trial_type_tag = build_trial_type_tag(trial_type_values);
 n_channels_to_plot = numel(channels_in_use);
@@ -232,7 +255,7 @@ for ch = 1:n_channels_to_plot
             trial_type_values, resolved_time_windows(w, :), channel_data_by_condition, window_indices{w});
     end
 
-    fig = figure('Color', 'w', 'Position', [100 100 1200 700], 'Visible', 'off');
+    fig = figure('Color', 'w', 'Position', plot_dimensions, 'Visible', 'off');
     hold on;
     colors = lines(n_conditions);
     legend_entries = {};
@@ -295,7 +318,9 @@ for ch = 1:n_channels_to_plot
         xline(0, '--', 'Color', [0.2 0.2 0.2], 'LineWidth', 1.0);
     end
     yline(0, ':', 'Color', [0.4 0.4 0.4], 'LineWidth', 1.0);
-    if ~isempty(time_vector)
+    if ~isempty(resolved_x_axis_range_ms)
+        xlim(resolved_x_axis_range_ms);
+    elseif ~isempty(time_vector)
         time_limits = [min(time_vector) max(time_vector)];
         if all(isfinite(time_limits)) && time_limits(1) < time_limits(2)
             xlim(time_limits);
@@ -367,7 +392,8 @@ for ch = 1:n_channels_to_plot
     save(output_mat, 'trial_type_values', 'channel_in_use', 'channels_in_use', 'time_vector', ...
         'grand_average_by_condition', 'trial_counts', 'participants_per_condition', ...
         'subject_ids', 'time_windows_ms', 'resolved_time_windows', 'window_indices', ...
-        'subject_window_means', 'stats_by_window');
+        'subject_window_means', 'stats_by_window', 'plot_dimensions', ...
+        'x_axis_range_ms', 'resolved_x_axis_range_ms');
 
     write_stats_report(output_stats_txt, input_folder, trial_type_values, channel_in_use, ...
         participants_per_condition, subject_ids, time_windows_ms, resolved_time_windows, ...
@@ -416,6 +442,9 @@ if nargout > 0
     results.time_windows_ms = time_windows_ms;
     results.resolved_time_windows = resolved_time_windows;
     results.window_sample_indices = window_indices;
+    results.plot_dimensions = plot_dimensions;
+    results.x_axis_range_ms = x_axis_range_ms;
+    results.resolved_x_axis_range_ms = resolved_x_axis_range_ms;
 
     if n_channels_to_plot == 1
         results.grand_average_by_condition = all_grand_average_by_condition{1};
@@ -504,6 +533,206 @@ if ischar(value) || (isstring(value) && isscalar(value))
 end
 
 error('%s must be logical, numeric 0/1, or a parseable string token.', arg_name);
+end
+
+function dims = parse_plot_dimensions(value, default_dims)
+if nargin < 2 || isempty(default_dims)
+    default_dims = [100 100 1200 700];
+end
+
+if isempty(value)
+    dims = double(default_dims(:)');
+else
+    dims = parse_numeric_vector_argument(value, 'plot_dimensions');
+end
+
+if numel(dims) ~= 4
+    error('plot_dimensions must resolve to exactly 4 values: [left bottom width height].');
+end
+if any(~isfinite(dims))
+    error('plot_dimensions contains non-finite values.');
+end
+if dims(3) <= 0 || dims(4) <= 0
+    error('plot_dimensions width and height must be positive.');
+end
+
+dims = double(dims(:)');
+end
+
+function out = describe_x_axis_range_request(value)
+if isempty(value)
+    out = 'full data range';
+    return;
+end
+
+vals = parse_x_axis_range_request(value);
+if isempty(vals)
+    out = 'full data range';
+elseif isscalar(vals)
+    out = sprintf('%.3f ms from data start', vals);
+else
+    vals = sort(vals);
+    out = sprintf('%.3f to %.3f ms', vals(1), vals(2));
+end
+end
+
+function limits = resolve_x_axis_limits(time_vector, value)
+limits = [];
+if isempty(value)
+    return;
+end
+if isempty(time_vector)
+    error('Cannot apply x_axis_range_ms because the timeline is empty.');
+end
+
+raw_vals = parse_x_axis_range_request(value);
+if isempty(raw_vals)
+    return;
+end
+
+data_limits = [min(time_vector) max(time_vector)];
+if isscalar(raw_vals)
+    if raw_vals <= 0
+        error('x_axis_range_ms duration must be > 0.');
+    end
+    raw_vals = [data_limits(1) data_limits(1) + raw_vals];
+end
+
+raw_vals = sort(double(raw_vals(:)'));
+if numel(raw_vals) ~= 2 || raw_vals(1) == raw_vals(2)
+    error('x_axis_range_ms must resolve to [start end] with different values.');
+end
+
+if raw_vals(2) < data_limits(1) || raw_vals(1) > data_limits(2)
+    error(['Requested x_axis_range_ms %.3f to %.3f is outside the data range ' ...
+           '(%.3f to %.3f).'], raw_vals(1), raw_vals(2), data_limits(1), data_limits(2));
+end
+
+clamped = [max(raw_vals(1), data_limits(1)), min(raw_vals(2), data_limits(2))];
+idx = find(time_vector >= clamped(1) & time_vector <= clamped(2));
+if isempty(idx)
+    error('x_axis_range_ms %.3f to %.3f has no samples in the timeline.', clamped(1), clamped(2));
+end
+
+if numel(idx) == 1
+    idx0 = idx(1);
+    idx1 = max(1, idx0 - 1);
+    idx2 = min(numel(time_vector), idx0 + 1);
+    if idx1 == idx2
+        error(['x_axis_range_ms %.3f to %.3f resolves to a single sample only. ' ...
+               'Please provide a wider range.'], clamped(1), clamped(2));
+    end
+    idx = [idx1 idx2];
+end
+
+limits = [time_vector(idx(1)) time_vector(idx(end))];
+if limits(1) >= limits(2)
+    error('x_axis_range_ms could not be resolved to an increasing x-axis range.');
+end
+end
+
+function vals = parse_x_axis_range_request(value)
+if isempty(value)
+    vals = [];
+    return;
+end
+
+if isnumeric(value)
+    vals = double(value(:)');
+elseif iscell(value)
+    if numel(value) ~= 1
+        error('x_axis_range_ms cell input must contain exactly one value or range.');
+    end
+    vals = parse_x_axis_range_request(value{1});
+    return;
+elseif isstring(value)
+    if ~isscalar(value)
+        error('x_axis_range_ms string input must be scalar.');
+    end
+    vals = parse_x_axis_range_request(char(value));
+    return;
+elseif ischar(value)
+    raw = strtrim(value);
+    if isempty(raw)
+        vals = [];
+        return;
+    end
+    raw = regexprep(raw, '(?i)\bms\b', '');
+    raw = regexprep(raw, '(?i)\bto\b', '-');
+    raw = strrep(raw, sprintf('\n'), ' ');
+
+    if contains(raw, ';')
+        error(['x_axis_range_ms must be a single range or scalar duration. ' ...
+               'Examples: "0-800" or "800".']);
+    end
+
+    pair_tokens = regexp(raw, '^\s*([+-]?\d*\.?\d+)\s*[-,:]\s*([+-]?\d*\.?\d+)\s*$', ...
+        'tokens', 'once');
+    if isempty(pair_tokens)
+        pair_tokens = regexp(raw, '^\s*([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)\s*$', ...
+            'tokens', 'once');
+    end
+
+    if ~isempty(pair_tokens)
+        vals = [str2double(pair_tokens{1}) str2double(pair_tokens{2})];
+    else
+        number_tokens = regexp(raw, '[+-]?\d*\.?\d+', 'match');
+        if isempty(number_tokens)
+            error(['Could not parse x_axis_range_ms "%s". Use [start end], "start-end", ' ...
+                   'or a scalar duration in ms.'], raw);
+        end
+        vals = str2double(number_tokens);
+    end
+else
+    error('x_axis_range_ms must be empty, numeric, or a parseable string.');
+end
+
+if any(~isfinite(vals))
+    error('x_axis_range_ms contains non-numeric values.');
+end
+if numel(vals) ~= 1 && numel(vals) ~= 2
+    error('x_axis_range_ms must resolve to one value (duration) or two values ([start end]).');
+end
+
+vals = double(vals(:)');
+end
+
+function vals = parse_numeric_vector_argument(value, arg_name)
+if nargin < 2 || isempty(arg_name)
+    arg_name = 'value';
+end
+
+if isnumeric(value)
+    vals = double(value(:)');
+elseif ischar(value) || (isstring(value) && isscalar(value))
+    raw = strtrim(char(value));
+    if isempty(raw)
+        vals = [];
+    else
+        raw = strrep(raw, sprintf('\n'), ' ');
+        number_tokens = regexp(raw, '[+-]?\d*\.?\d+', 'match');
+        if isempty(number_tokens)
+            error('Could not parse numeric values for %s from "%s".', arg_name, raw);
+        end
+        vals = str2double(number_tokens);
+    end
+elseif isstring(value)
+    vals = [];
+    for i = 1:numel(value)
+        vals = [vals parse_numeric_vector_argument(char(value(i)), arg_name)]; %#ok<AGROW>
+    end
+elseif iscell(value)
+    vals = [];
+    for i = 1:numel(value)
+        vals = [vals parse_numeric_vector_argument(value{i}, arg_name)]; %#ok<AGROW>
+    end
+else
+    error('%s must be numeric or a parseable string.', arg_name);
+end
+
+if any(~isfinite(vals))
+    error('%s contains non-finite values.', arg_name);
+end
 end
 
 function labels = parse_trial_type_values(value)
@@ -1023,11 +1252,22 @@ if isempty(channels_in_use)
     out = '';
     return;
 end
-tokens = arrayfun(@(ch) sprintf('E%d', ch), channels_in_use, 'UniformOutput', false);
+tokens = arrayfun(@channel_display_name, channels_in_use, 'UniformOutput', false);
 if numel(tokens) == 1
     out = tokens{1};
 else
     out = strjoin(tokens, ', ');
+end
+end
+
+function out = channel_display_name(channel_idx)
+switch double(channel_idx)
+    case 21
+        out = 'Fz';
+    case 87
+        out = 'P3';
+    otherwise
+        out = sprintf('E%d', channel_idx);
 end
 end
 

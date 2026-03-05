@@ -1,4 +1,4 @@
-function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
+function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms)
 % HPC_LIMO_CHANNEL_TIME_PLOTS - Generate channel-time and topoplot figures
 %
 % Usage:
@@ -7,6 +7,7 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms)
 %
 % Inputs:
 %   input_folder - Path to a limo_second_level_<output_tag> folder containing
@@ -21,6 +22,7 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %                        'grid'   (default): near-square grid layout
 %                        'zigzag' : staggered left-to-right zigzag line
 %                        'line'   : single horizontal row
+%   topoplot_step_ms   - Optional topoplot interval in ms (default: 100)
 %
 % Outputs:
 %   - <output_dir>/<test_name>_channel_time_plot.png      Signed -log10(p) channel-time plot
@@ -47,12 +49,16 @@ end
 if nargin < 7 || isempty(topoplot_layout_type)
     topoplot_layout_type = 'grid';
 end
+if nargin < 8 || isempty(topoplot_step_ms)
+    topoplot_step_ms = 100;
+end
 
 title_base = strtrim(char(title_base));
 channel_time_title = strtrim(char(channel_time_title));
 topoplot_title = strtrim(char(topoplot_title));
 lr_title = strtrim(char(lr_title));
 topoplot_layout_type = normalize_topoplot_layout_type(topoplot_layout_type);
+topoplot_step_ms = normalize_topoplot_step_ms(topoplot_step_ms);
 
 % ==================== PARSE INPUT FOLDER ====================
 [~, folder_name] = fileparts(input_folder);
@@ -80,6 +86,7 @@ fprintf('  Channel-time: %s\n', default_channel_time_title);
 fprintf('  Topoplots:    %s\n', default_topoplot_title);
 fprintf('  LR:           %s\n', default_lr_title);
 fprintf('  Topoplot layout: %s\n', topoplot_layout_type);
+fprintf('  Topoplot step (ms): %d\n', topoplot_step_ms);
 
 % ==================== SETUP ====================
 if ~exist(output_dir, 'dir')
@@ -88,7 +95,16 @@ end
 
 fprintf('Starting EEGLAB in headless mode...\n');
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1');
-eeglab nogui;
+addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis');
+configure_eeglab_offline_mode();
+try
+    eeglab nogui;
+catch ME
+    fprintf('EEGLAB startup failed on first attempt; retrying in offline mode...\n');
+    disp(getReport(ME));
+    configure_eeglab_offline_mode();
+    eeglab nogui;
+end
 
 % ==================== LOAD DATA ====================
 limo_path       = fullfile(input_folder, 'LIMO.mat');
@@ -211,6 +227,67 @@ ylim([1 num_channels]);
 grid(imgax_exp, 'off');
 set(imgax_exp, 'XColor', 'k', 'YColor', 'k');
 hold on;
+
+% Highlight rectangles copied from /home/devon7y/scratch/devon7y/scripts/channel_time_plots.m
+% Each entry is [time_ms, channel; time_ms, channel].
+highlight_rects = { ...
+    [300, 21; 800, 21], ...
+    [300, 87; 800, 87], ...
+    [300, 101; 800, 101], ...
+    [300, 153; 800, 153] ...
+};
+% Example legacy alternatives:
+% [400, 21; 700, 21], [400, 36; 700, 36], [400, 101; 700, 101], [-100, 224; 1500, 224]
+highlight_labels = {'E21', 'E36', 'E101', 'E153'};
+
+% Draw highlighted rectangles and left-margin labels.
+if ~isempty(highlight_rects)
+    axis_font_size = get(imgax_exp, 'FontSize');
+    time_range = times(end) - times(1);
+    label_offset = 0.004 * time_range;
+
+    if numel(times_hr) > 1
+        time_step = times_hr(2) - times_hr(1);
+    else
+        time_step = 0;
+    end
+
+    for i = 1:numel(highlight_rects)
+        coords = highlight_rects{i};
+        time1 = coords(1, 1);
+        chan1 = coords(1, 2);
+        time2 = coords(2, 1);
+        chan2 = coords(2, 2);
+
+        [~, time_idx1] = min(abs(times_hr - time1));
+        [~, time_idx2] = min(abs(times_hr - time2));
+        exact_time1 = times_hr(time_idx1);
+        exact_time2 = times_hr(time_idx2);
+
+        x = min(exact_time1, exact_time2) - time_step / 2;
+        y = min(chan1, chan2) - 0.5;
+        width = abs(exact_time2 - exact_time1) + time_step;
+        height = abs(chan2 - chan1) + 1;
+
+        patch([x, x + width, x + width, x], ...
+            [y, y, y + height, y + height], ...
+            [0 1 0], ...
+            'FaceAlpha', 0.5, ...
+            'EdgeColor', 'none', ...
+            'Parent', imgax_exp);
+
+        if i <= numel(highlight_labels) && ~isempty(highlight_labels{i})
+            label_y = y + height / 2 - 0.25;
+            label_x = times(1) - label_offset;
+            text(label_x, label_y, highlight_labels{i}, ...
+                'HorizontalAlignment', 'right', ...
+                'VerticalAlignment', 'middle', ...
+                'Color', 'k', ...
+                'FontSize', axis_font_size, ...
+                'Clipping', 'off');
+        end
+    end
+end
 
 % Add vertical line at time=0
 ylim_vals = get(imgax_exp, 'YLim');
@@ -502,7 +579,6 @@ end
 output_file_topo_png = fullfile(output_dir, sprintf('%s_topoplots.png', test_name));
 output_file_topo_svg = fullfile(output_dir, sprintf('%s_topoplots.svg', test_name));
 max_latency = min(times(end), 2500);
-topoplot_step_ms = 100;
 latencies = topoplot_step_ms:topoplot_step_ms:max_latency;
 
 if times(1) > 0
@@ -609,7 +685,46 @@ close(fig_topo);
 fprintf('Saved topoplot PNG: %s\n', output_file_topo_png);
 
 fprintf('\nAll plots completed! Saved to: %s\n', output_dir);
+end
 
+function step_ms = normalize_topoplot_step_ms(value)
+if ischar(value) || (isstring(value) && isscalar(value))
+    parsed = str2double(strtrim(char(value)));
+elseif isnumeric(value) && isscalar(value)
+    parsed = double(value);
+else
+    parsed = NaN;
+end
+
+if ~isfinite(parsed) || parsed <= 0
+    warning('Invalid topoplot_step_ms value. Falling back to 100 ms.');
+    step_ms = 100;
+    return;
+end
+
+step_ms = max(1, round(parsed));
+
+end
+
+function configure_eeglab_offline_mode()
+% Keep EEGLAB from querying remote plugin/update metadata.
+setenv('EEGLAB_NO_UPDATE', '1');
+setenv('HTTP_PROXY', '');
+setenv('HTTPS_PROXY', '');
+setenv('http_proxy', '');
+setenv('https_proxy', '');
+
+safe_setpref('Internet', 'EeglabServerCheck', 'off');
+safe_setpref('Internet', 'EeglabUpdateServer', 'off');
+safe_setpref('Internet', 'EeglabPluginlistURL', 'off');
+end
+
+function safe_setpref(pref_group, pref_name, pref_value)
+try
+    setpref(pref_group, pref_name, pref_value);
+catch ME
+    warning('setpref failed for %s.%s: %s', pref_group, pref_name, ME.message);
+end
 end
 
 function display_name = derive_display_contrast_name(input_folder, folder_name)

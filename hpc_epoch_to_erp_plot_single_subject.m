@@ -1,13 +1,16 @@
-function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source)
-% HPC_EPOCH_TO_ERP_PLOT_SINGLE_SUBJECT - Plot grand-average ERP curves from
-% LIMO single-subject parameter files.
+function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
+% HPC_EPOCH_TO_ERP_PLOT_SINGLE_SUBJECT - Plot grand-average ERP curves by
+% trial_type using LIMO single-subject parameter files.
 %
 % Usage:
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels)
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir)
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title)
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
-%   hpc_epoch_to_erp_plot_single_subject(..., condition_order_source)
+%   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source)
+%   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars)
+%   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions)
+%   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
 %
 % Inputs:
 %   input_folder      - Folder containing parameter_<N>_single_subjects_Mean.mat files.
@@ -23,16 +26,24 @@ function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type
 %                       - multiple windows: [300 500; 600 800] or '300-500;600-800'
 %                       If provided and exactly 2 conditions are requested, paired t-tests
 %                       are run on subject-level average voltage per window.
-%   condition_order_source - Optional condition-order path:
-%                       - file: condition_order.mat / condition_order.txt
-%                       - folder containing condition_order files
-%                       If omitted, the newest condition_order file under input_folder is used.
+%   condition_order_source - Optional path to condition_order.mat/txt, or folder containing one.
+%                       If empty, the newest condition_order file under input_folder is used.
+%   show_error_bars   - Optional logical toggle for within-subject SEM shading
+%                       (default: true). Accepts true/false, 1/0, yes/no, on/off.
+%   plot_dimensions   - Optional figure position vector [left bottom width height]
+%                       (default: [100 100 1200 700]).
+%   x_axis_range_ms   - Optional x-axis range in ms (default: full data range).
+%                       Accepted formats:
+%                       - [start end], 'start-end', 'start,end', 'start end'
+%                       - scalar duration in ms (e.g., 800 => [data_start, data_start+800])
 %
 % Outputs:
-%   - <output_dir>/grand_average_erp_single_subject_<trial_types>.png
-%   - <output_dir>/grand_average_erp_single_subject_<trial_types>.svg (best effort on headless HPC)
-%   - <output_dir>/grand_average_erp_single_subject_<trial_types>.mat
-%   - <output_dir>/grand_average_erp_single_subject_<trial_types>_stats_<timestamp>.txt
+%   - If one channel: same as before
+%       <output_dir>/grand_average_erp_single_subject_<trial_types>.{png,svg,mat}
+%   - If multiple channels: one file set per channel, suffixed by electrode
+%       <output_dir>/grand_average_erp_single_subject_<trial_types>_E<channel>.{png,svg,mat}
+%   - Stats report(s):
+%       <output_dir>/grand_average_erp_single_subject_<trial_types>[_E<channel>]_stats_<timestamp>.txt
 
 if nargin < 2 || isempty(trial_type_values)
     error('trial_type_values is required (CSV, string array, or cell array).');
@@ -40,11 +51,12 @@ end
 if nargin < 3 || isempty(channels)
     error('channels is required (numeric vector or CSV string).');
 end
+input_folder = normalize_input_folder(input_folder);
 if nargin < 4 || isempty(output_dir)
     output_dir = fullfile(input_folder, 'erp_plots_single_subject');
 end
 if nargin < 5 || isempty(figure_title)
-    figure_title = 'Grand Average ERP by trial_type (single-subject parameter files)';
+    figure_title = 'Grand Average ERP by Trial Type (Single-Subject Parameter Means)';
 end
 if nargin < 6
     time_window_ms = [];
@@ -52,10 +64,51 @@ end
 if nargin < 7
     condition_order_source = '';
 end
+if nargin < 8
+    show_error_bars = true;
+end
+if nargin < 9
+    plot_dimensions = [100 100 1200 700];
+end
+if nargin < 10
+    x_axis_range_ms = [];
+end
+
+% Backward compatibility: if arg7 is a logical flag, treat it as show_error_bars.
+if nargin < 8 && ~isempty(condition_order_source) && ...
+        ~(ischar(condition_order_source) || (isstring(condition_order_source) && isscalar(condition_order_source)) || ...
+          (iscell(condition_order_source) && numel(condition_order_source) == 1))
+    show_error_bars = condition_order_source;
+    condition_order_source = '';
+end
 
 trial_type_values = parse_trial_type_values(trial_type_values);
+trial_type_display_values = cellfun(@format_display_label, trial_type_values, 'UniformOutput', false);
 channels = parse_channel_list(channels);
 time_windows_ms = parse_time_windows(time_window_ms);
+if iscell(condition_order_source)
+    if numel(condition_order_source) ~= 1
+        error('condition_order_source cell input must contain exactly one path.');
+    end
+    condition_order_source = condition_order_source{1};
+end
+if isstring(condition_order_source)
+    if isscalar(condition_order_source)
+        condition_order_source = char(condition_order_source);
+    else
+        error('condition_order_source string input must be scalar.');
+    end
+end
+if isempty(condition_order_source)
+    condition_order_source = '';
+elseif ~ischar(condition_order_source)
+    error('condition_order_source must be a path string, folder path, or empty.');
+else
+    condition_order_source = normalize_input_folder(condition_order_source);
+end
+show_error_bars = parse_logical_flag(show_error_bars, 'show_error_bars', true);
+plot_dimensions = parse_plot_dimensions(plot_dimensions, [100 100 1200 700]);
+figure_title = normalize_figure_title_text(figure_title);
 
 fprintf('\n==============================================\n');
 fprintf('  HPC SINGLE-SUBJECT PARAMETER -> ERP PLOT\n');
@@ -69,6 +122,9 @@ if ~isempty(condition_order_source)
 else
     fprintf('Condition map:  (auto-detect)\n');
 end
+fprintf('Error bars:     %s\n', logical_to_onoff(show_error_bars));
+fprintf('Plot dims:      [%.0f %.0f %.0f %.0f]\n', plot_dimensions);
+fprintf('X-axis range:   %s\n', describe_x_axis_range_request(x_axis_range_ms));
 if ~isempty(time_windows_ms)
     fprintf('Time windows:\n');
     for w = 1:size(time_windows_ms, 1)
@@ -91,7 +147,9 @@ set(0, 'DefaultFigureVisible', 'off');
 java.lang.System.setProperty('java.awt.headless', 'true');
 
 n_conditions = numel(trial_type_values);
+
 all_data_by_condition = cell(n_conditions, 1);
+single_subject_trial_sem_by_condition = cell(n_conditions, 1);
 time_vector = [];
 xlabel_text = 'Time (ms)';
 channels_in_use = [];
@@ -99,6 +157,8 @@ n_timepoints = [];
 n_subjects = [];
 subject_ids = {};
 trial_counts = [];
+condition_order = {};
+condition_order_path = '';
 parameter_indices = nan(1, n_conditions);
 parameter_files = cell(1, n_conditions);
 
@@ -123,10 +183,6 @@ for c = 1:n_conditions
             label, param_idx, param_file);
     end
 
-    parameter_indices(c) = param_idx;
-    parameter_files{c} = param_file;
-    fprintf('Condition %-30s -> parameter_%d_single_subjects_Mean.mat\n', label, param_idx);
-
     loaded = load(param_file);
     [condition_data, cond_time_vector, cond_xlabel] = extract_single_subject_condition_data(loaded, param_file);
 
@@ -135,10 +191,13 @@ for c = 1:n_conditions
         n_timepoints = size(condition_data, 2);
         channels_in_use = validate_channels(channels, size(condition_data, 1));
         subject_ids = build_subject_ids(n_subjects);
-        trial_counts = ones(n_subjects, n_conditions);
+        trial_counts = zeros(n_subjects, n_conditions);
 
         for k = 1:n_conditions
             all_data_by_condition{k} = nan(numel(channels_in_use), n_timepoints, n_subjects);
+            if n_subjects == 1
+                single_subject_trial_sem_by_condition{k} = nan(numel(channels_in_use), n_timepoints);
+            end
         end
 
         if ~isempty(cond_time_vector) && numel(cond_time_vector) == n_timepoints
@@ -166,19 +225,33 @@ for c = 1:n_conditions
         end
     end
 
-    all_data_by_condition{c} = condition_data(channels_in_use, :, :);
-end
+    condition_selected = condition_data(channels_in_use, :, :);
+    all_data_by_condition{c} = condition_selected;
+    parameter_indices(c) = param_idx;
+    parameter_files{c} = param_file;
 
-grand_average_by_condition = cell(n_conditions, 1);
-participants_per_condition = zeros(1, n_conditions);
-for c = 1:n_conditions
-    valid_subject_mask = squeeze(any(any(isfinite(all_data_by_condition{c}), 1), 2));
+    valid_subject_mask = squeeze(any(any(isfinite(condition_selected), 1), 2));
     if isrow(valid_subject_mask)
         valid_subject_mask = valid_subject_mask';
     end
-    participants_per_condition(c) = sum(valid_subject_mask);
+    if isempty(valid_subject_mask)
+        valid_subject_mask = false(n_subjects, 1);
+    end
+    if numel(valid_subject_mask) ~= n_subjects
+        error('Unexpected valid-subject mask length for condition "%s".', label);
+    end
     trial_counts(:, c) = double(valid_subject_mask);
-    grand_average_by_condition{c} = mean(all_data_by_condition{c}, 3, 'omitnan');
+    fprintf('  %-30s subjects with data: %d (parameter_%d)\n', ...
+        label, sum(valid_subject_mask), param_idx);
+end
+
+participants_per_condition = zeros(1, n_conditions);
+for c = 1:n_conditions
+    participants_per_condition(c) = sum(trial_counts(:, c) > 0);
+end
+legend_n_values = participants_per_condition;
+if n_subjects == 1
+    legend_n_values = trial_counts(1, :);
 end
 
 n_windows = size(time_windows_ms, 1);
@@ -193,131 +266,208 @@ for w = 1:n_windows
     window_indices{w} = idx;
     resolved_time_windows(w, :) = resolved_window;
 end
-
-subject_window_means = nan(n_subjects, n_conditions, n_windows);
-for w = 1:n_windows
-    idx = window_indices{w};
-    for c = 1:n_conditions
-        subject_window_means(:, c, w) = compute_subject_window_means(all_data_by_condition{c}, idx);
-    end
+resolved_x_axis_range_ms = resolve_x_axis_limits(time_vector, x_axis_range_ms);
+if isempty(resolved_x_axis_range_ms)
+    fprintf('Resolved x-axis: full data range (%.3f to %.3f ms)\n', min(time_vector), max(time_vector));
+else
+    fprintf('Resolved x-axis: %.3f to %.3f ms\n', resolved_x_axis_range_ms(1), resolved_x_axis_range_ms(2));
 end
-
-stats_by_window = repmat(init_stats_struct(), n_windows, 1);
-for w = 1:n_windows
-    stats_by_window(w) = run_window_stats_for_window(subject_window_means(:, :, w), subject_ids, ...
-        trial_type_values, resolved_time_windows(w, :));
-end
-
-fig = figure('Color', 'w', 'Position', [100 100 1200 700], 'Visible', 'off');
-hold on;
-colors = lines(n_conditions);
-legend_entries = {};
-plotted_any = false;
-
-for c = 1:n_conditions
-    if participants_per_condition(c) < 1
-        fprintf('WARNING: No matching trials found for "%s" across all subjects.\n', trial_type_values{c});
-        continue;
-    end
-
-    curve_data = grand_average_by_condition{c};
-    if size(curve_data, 1) > 1
-        curve_data = mean(curve_data, 1, 'omitnan');
-    end
-
-    plot(time_vector, curve_data, 'Color', colors(c, :), 'LineWidth', 2.2);
-    legend_entries{end+1} = sprintf('%s (n=%d)', trial_type_values{c}, participants_per_condition(c)); %#ok<AGROW>
-    plotted_any = true;
-end
-
-if ~plotted_any
-    close(fig);
-    error('No requested conditions could be plotted from the single-subject parameter files.');
-end
-
-if strcmp(xlabel_text, 'Time (ms)')
-    xline(0, '--', 'Color', [0.2 0.2 0.2], 'LineWidth', 1.0);
-end
-yline(0, ':', 'Color', [0.4 0.4 0.4], 'LineWidth', 1.0);
-grid on;
-box off;
-
-if n_windows > 0
-    y_limits = ylim;
-    for w = 1:n_windows
-        idx = window_indices{w};
-        x1 = time_vector(idx(1));
-        x2 = time_vector(idx(end));
-        highlight = patch([x1 x2 x2 x1], [y_limits(1) y_limits(1) y_limits(2) y_limits(2)], ...
-            [0.93 0.89 0.65], 'FaceAlpha', 0.16, 'EdgeColor', 'none');
-        uistack(highlight, 'bottom');
-    end
-end
-
-xlabel(xlabel_text);
-ylabel('Voltage (\muV)');
-title(figure_title, 'Interpreter', 'none');
-legend(legend_entries, 'Location', 'best', 'Interpreter', 'none');
-
-if n_windows > 0
-    stat_text = build_stats_annotation(stats_by_window);
-    [stat_color, stat_bg] = stats_annotation_colors(stats_by_window);
-    x_limits = xlim;
-    y_limits = ylim;
-    text_x = x_limits(1) + 0.02 * (x_limits(2) - x_limits(1));
-    text_y = y_limits(2) - 0.04 * (y_limits(2) - y_limits(1));
-    text(text_x, text_y, stat_text, ...
-        'Color', stat_color, ...
-        'BackgroundColor', stat_bg, ...
-        'EdgeColor', [0.8 0.8 0.8], ...
-        'Margin', 5, ...
-        'VerticalAlignment', 'top', ...
-        'Interpreter', 'none', ...
-        'FontSize', 10, ...
-        'FontWeight', 'bold');
-end
-
-hold off;
 
 trial_type_tag = build_trial_type_tag(trial_type_values);
-output_png = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s.png', trial_type_tag));
-output_svg = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s.svg', trial_type_tag));
-output_mat = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s.mat', trial_type_tag));
-timestamp_tag = datestr(now, 'yyyymmdd_HHMMSS');
-output_stats_txt = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s_stats_%s.txt', ...
-    trial_type_tag, timestamp_tag));
+n_channels_to_plot = numel(channels_in_use);
 
-exportgraphics(fig, output_png, 'Resolution', 300);
-svg_saved = save_svg_with_fallback(fig, output_svg);
-close(fig);
+all_output_png = cell(n_channels_to_plot, 1);
+all_output_svg = cell(n_channels_to_plot, 1);
+all_output_mat = cell(n_channels_to_plot, 1);
+all_output_stats_txt = cell(n_channels_to_plot, 1);
+all_grand_average_by_condition = cell(n_channels_to_plot, 1);
+all_subject_window_means = cell(n_channels_to_plot, 1);
+all_stats_by_window = cell(n_channels_to_plot, 1);
 
-save(output_mat, 'trial_type_values', 'channels_in_use', 'time_vector', ...
-    'grand_average_by_condition', 'trial_counts', 'participants_per_condition', ...
-    'subject_ids', 'time_windows_ms', 'resolved_time_windows', 'window_indices', ...
-    'subject_window_means', 'stats_by_window', 'condition_order', ...
-    'condition_order_path', 'parameter_indices', 'parameter_files');
+for ch = 1:n_channels_to_plot
+    channel_in_use = channels_in_use(ch);
+    channel_data_by_condition = cell(n_conditions, 1);
+    grand_average_by_condition = cell(n_conditions, 1);
 
-write_stats_report(output_stats_txt, input_folder, trial_type_values, channels_in_use, ...
-    participants_per_condition, subject_ids, time_windows_ms, resolved_time_windows, ...
-    window_indices, subject_window_means, stats_by_window, output_png, output_svg, ...
-    output_mat, svg_saved);
+    for c = 1:n_conditions
+        channel_data_by_condition{c} = all_data_by_condition{c}(ch, :, :);
+        grand_average_by_condition{c} = mean(channel_data_by_condition{c}, 3, 'omitnan');
+    end
 
-fprintf('\n==============================================\n');
-fprintf('  ERP PLOT COMPLETE\n');
-fprintf('==============================================\n');
-for c = 1:n_conditions
-    fprintf('  %-30s participants with data: %d\n', ...
-        trial_type_values{c}, participants_per_condition(c));
+    subject_window_means = nan(n_subjects, n_conditions, n_windows);
+    for w = 1:n_windows
+        idx = window_indices{w};
+        for c = 1:n_conditions
+            subject_window_means(:, c, w) = compute_subject_window_means(channel_data_by_condition{c}, idx);
+        end
+    end
+
+    stats_by_window = repmat(init_stats_struct(), n_windows, 1);
+    for w = 1:n_windows
+        stats_by_window(w) = run_window_stats_for_window(subject_window_means(:, :, w), subject_ids, ...
+            trial_type_values, resolved_time_windows(w, :), channel_data_by_condition, window_indices{w});
+    end
+
+    fig = figure('Color', 'w', 'Position', plot_dimensions, 'Visible', 'off');
+    hold on;
+    colors = lines(n_conditions);
+    legend_entries = {};
+    line_handles = gobjects(0);
+    plotted_any = false;
+    plotted_curves = [];
+    if show_error_bars
+        single_subject_trial_sem_for_channel = cell(n_conditions, 1);
+        if n_subjects == 1
+            for c = 1:n_conditions
+                sem_matrix = single_subject_trial_sem_by_condition{c};
+                if ~isempty(sem_matrix) && size(sem_matrix, 1) >= ch
+                    single_subject_trial_sem_for_channel{c} = sem_matrix(ch, :);
+                end
+            end
+        end
+        within_subject_sem_by_condition = compute_within_subject_sem_by_condition( ...
+            channel_data_by_condition, single_subject_trial_sem_for_channel);
+    else
+        within_subject_sem_by_condition = cell(n_conditions, 1);
+    end
+
+    for c = 1:n_conditions
+        if participants_per_condition(c) < 1
+            fprintf('WARNING: No matching trials found for "%s" across all subjects.\n', trial_type_values{c});
+            continue;
+        end
+
+        curve_data = squeeze(grand_average_by_condition{c});
+        curve_data = curve_data(:)';
+
+        if numel(within_subject_sem_by_condition) >= c && ~isempty(within_subject_sem_by_condition{c})
+            curve_sem = within_subject_sem_by_condition{c}(:)';
+            if numel(curve_sem) == numel(curve_data)
+                sem_mask = isfinite(curve_sem);
+                if any(sem_mask)
+                    upper_curve = curve_data + curve_sem;
+                    lower_curve = curve_data - curve_sem;
+                    patch([time_vector fliplr(time_vector)], [upper_curve fliplr(lower_curve)], ...
+                        colors(c, :), 'FaceAlpha', 0.16, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+                    plotted_curves(end+1, :) = upper_curve; %#ok<AGROW>
+                    plotted_curves(end+1, :) = lower_curve; %#ok<AGROW>
+                end
+            end
+        end
+
+        line_handle = plot(time_vector, curve_data, 'Color', colors(c, :), 'LineWidth', 2.2);
+        line_handles(end+1) = line_handle; %#ok<AGROW>
+        plotted_curves(end+1, :) = curve_data; %#ok<AGROW>
+        legend_entries{end+1} = sprintf('%s (n=%d)', trial_type_display_values{c}, legend_n_values(c)); %#ok<AGROW>
+        plotted_any = true;
+    end
+
+    if ~plotted_any
+        close(fig);
+        error('No requested conditions could be plotted from single-subject parameter files.');
+    end
+
+    if strcmp(xlabel_text, 'Time (ms)')
+        xline(0, '--', 'Color', [0.2 0.2 0.2], 'LineWidth', 1.0);
+    end
+    yline(0, ':', 'Color', [0.4 0.4 0.4], 'LineWidth', 1.0);
+    if ~isempty(resolved_x_axis_range_ms)
+        xlim(resolved_x_axis_range_ms);
+    elseif ~isempty(time_vector)
+        time_limits = [min(time_vector) max(time_vector)];
+        if all(isfinite(time_limits)) && time_limits(1) < time_limits(2)
+            xlim(time_limits);
+        end
+    end
+    set_data_driven_ylim(gca, plotted_curves);
+    grid off;
+    box off;
+
+    window_patches = gobjects(0);
+    if n_windows > 0
+        y_limits = ylim;
+        for w = 1:n_windows
+            idx = window_indices{w};
+            x1 = time_vector(idx(1));
+            x2 = time_vector(idx(end));
+            highlight_color = window_highlight_color(stats_by_window, w);
+            highlight = patch([x1 x2 x2 x1], [y_limits(1) y_limits(1) y_limits(2) y_limits(2)], ...
+                highlight_color, 'FaceAlpha', 0.30, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+            uistack(highlight, 'bottom');
+            window_patches(end+1) = highlight; %#ok<AGROW>
+        end
+    end
+
+    xlabel(xlabel_text);
+    ylabel('Voltage (\muV)');
+    title(compose_plot_title(figure_title, channel_in_use, n_subjects == 1, trial_type_display_values), 'Interpreter', 'none');
+    legend_handle = legend(line_handles, legend_entries, 'Location', 'northeast', 'Interpreter', 'none');
+    apply_font_scale(fig, 1.20);
+    adjust_ylim_for_legend_clearance(gca, legend_handle, time_vector, plotted_curves);
+    if ~isempty(window_patches)
+        stretch_window_patches(window_patches, ylim(gca));
+    end
+
+    hold off;
+
+    channel_suffix = '';
+    if n_channels_to_plot > 1
+        channel_suffix = sprintf('_E%d', channel_in_use);
+    end
+
+    output_png = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s%s.png', trial_type_tag, channel_suffix));
+    output_svg = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s%s.svg', trial_type_tag, channel_suffix));
+    output_mat = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s%s.mat', trial_type_tag, channel_suffix));
+    timestamp_tag = datestr(now, 'yyyymmdd_HHMMSS');
+    output_stats_txt = fullfile(output_dir, sprintf('grand_average_erp_single_subject_%s%s_stats_%s.txt', ...
+        trial_type_tag, channel_suffix, timestamp_tag));
+
+    exportgraphics(fig, output_png, 'Resolution', 300);
+    svg_saved = save_svg_with_fallback(fig, output_svg);
+    close(fig);
+
+    save(output_mat, 'trial_type_values', 'channel_in_use', 'channels_in_use', 'time_vector', ...
+        'grand_average_by_condition', 'trial_counts', 'participants_per_condition', ...
+        'subject_ids', 'time_windows_ms', 'resolved_time_windows', 'window_indices', ...
+        'subject_window_means', 'stats_by_window', 'condition_order', ...
+        'condition_order_path', 'parameter_indices', 'parameter_files', ...
+        'plot_dimensions', 'x_axis_range_ms', 'resolved_x_axis_range_ms');
+
+    write_stats_report(output_stats_txt, input_folder, trial_type_values, channel_in_use, ...
+        participants_per_condition, subject_ids, time_windows_ms, resolved_time_windows, ...
+        window_indices, subject_window_means, stats_by_window, output_png, output_svg, ...
+        output_mat, svg_saved);
+
+    fprintf('\n==============================================\n');
+    fprintf('  ERP PLOT COMPLETE\n');
+    fprintf('==============================================\n');
+    fprintf('Plotted channel: E%d\n', channel_in_use);
+    for c = 1:n_conditions
+        fprintf('  %-30s participants with data: %d\n', ...
+            trial_type_values{c}, participants_per_condition(c));
+    end
+    fprintf('Saved PNG: %s\n', output_png);
+    if svg_saved
+        fprintf('Saved SVG: %s\n', output_svg);
+    else
+        fprintf('SVG export unavailable in this MATLAB/headless config; skipped SVG.\n');
+    end
+    fprintf('Saved MAT: %s\n', output_mat);
+    fprintf('Saved STATS TXT: %s\n', output_stats_txt);
+    fprintf('==============================================\n\n');
+
+    all_output_png{ch} = output_png;
+    if svg_saved
+        all_output_svg{ch} = output_svg;
+    else
+        all_output_svg{ch} = '';
+    end
+    all_output_mat{ch} = output_mat;
+    all_output_stats_txt{ch} = output_stats_txt;
+    all_grand_average_by_condition{ch} = grand_average_by_condition;
+    all_subject_window_means{ch} = subject_window_means;
+    all_stats_by_window{ch} = stats_by_window;
 end
-fprintf('Saved PNG: %s\n', output_png);
-if svg_saved
-    fprintf('Saved SVG: %s\n', output_svg);
-else
-    fprintf('SVG export unavailable in this MATLAB/headless config; skipped SVG.\n');
-end
-fprintf('Saved MAT: %s\n', output_mat);
-fprintf('Saved STATS TXT: %s\n', output_stats_txt);
-fprintf('==============================================\n\n');
 
 if nargout > 0
     results = struct();
@@ -328,25 +478,303 @@ if nargout > 0
     results.parameter_files = parameter_files;
     results.channels = channels_in_use;
     results.time_vector = time_vector;
-    results.grand_average_by_condition = grand_average_by_condition;
     results.trial_counts = trial_counts;
     results.participants_per_condition = participants_per_condition;
     results.subject_ids = subject_ids;
-    results.output_png = output_png;
-    if svg_saved
-        results.output_svg = output_svg;
-    else
-        results.output_svg = '';
-    end
-    results.output_mat = output_mat;
-    results.output_stats_txt = output_stats_txt;
     results.time_windows_ms = time_windows_ms;
     results.resolved_time_windows = resolved_time_windows;
     results.window_sample_indices = window_indices;
-    results.subject_window_means = subject_window_means;
-    results.stats_by_window = stats_by_window;
+    results.plot_dimensions = plot_dimensions;
+    results.x_axis_range_ms = x_axis_range_ms;
+    results.resolved_x_axis_range_ms = resolved_x_axis_range_ms;
+
+    if n_channels_to_plot == 1
+        results.grand_average_by_condition = all_grand_average_by_condition{1};
+        results.output_png = all_output_png{1};
+        results.output_svg = all_output_svg{1};
+        results.output_mat = all_output_mat{1};
+        results.output_stats_txt = all_output_stats_txt{1};
+        results.subject_window_means = all_subject_window_means{1};
+        results.stats_by_window = all_stats_by_window{1};
+    else
+        results.grand_average_by_condition = all_grand_average_by_condition;
+        results.output_png = all_output_png;
+        results.output_svg = all_output_svg;
+        results.output_mat = all_output_mat;
+        results.output_stats_txt = all_output_stats_txt;
+        results.subject_window_means = all_subject_window_means;
+        results.stats_by_window = all_stats_by_window;
+    end
 end
 
+end
+
+function out = normalize_input_folder(path_in)
+out = strtrim(char(path_in));
+if isempty(out)
+    return;
+end
+
+while numel(out) > 1 && (out(end) == '/' || out(end) == '\')
+    out = out(1:end-1);
+end
+end
+
+function out = parse_logical_flag(value, arg_name, default_value)
+if nargin < 3
+    default_value = false;
+end
+if nargin < 2 || isempty(arg_name)
+    arg_name = 'value';
+end
+
+if isempty(value)
+    out = logical(default_value);
+    return;
+end
+
+if islogical(value)
+    if isscalar(value)
+        out = logical(value);
+        return;
+    end
+    error('%s must be a scalar logical value.', arg_name);
+end
+
+if isnumeric(value)
+    if isscalar(value) && isfinite(value)
+        if value == 0 || value == 1
+            out = logical(value);
+            return;
+        end
+    end
+    error('%s numeric value must be 0 or 1.', arg_name);
+end
+
+if ischar(value) || (isstring(value) && isscalar(value))
+    token = lower(strtrim(char(value)));
+    if isempty(token)
+        out = logical(default_value);
+        return;
+    end
+
+    true_tokens = {'1', 'true', 't', 'yes', 'y', 'on'};
+    false_tokens = {'0', 'false', 'f', 'no', 'n', 'off'};
+
+    if any(strcmp(token, true_tokens))
+        out = true;
+        return;
+    end
+    if any(strcmp(token, false_tokens))
+        out = false;
+        return;
+    end
+
+    error(['Could not parse %s="%s". Use true/false, 1/0, yes/no, or on/off.'], ...
+        arg_name, char(value));
+end
+
+error('%s must be logical, numeric 0/1, or a parseable string token.', arg_name);
+end
+
+function dims = parse_plot_dimensions(value, default_dims)
+if nargin < 2 || isempty(default_dims)
+    default_dims = [100 100 1200 700];
+end
+
+if isempty(value)
+    dims = double(default_dims(:)');
+else
+    dims = parse_numeric_vector_argument(value, 'plot_dimensions');
+end
+
+if numel(dims) ~= 4
+    error('plot_dimensions must resolve to exactly 4 values: [left bottom width height].');
+end
+if any(~isfinite(dims))
+    error('plot_dimensions contains non-finite values.');
+end
+if dims(3) <= 0 || dims(4) <= 0
+    error('plot_dimensions width and height must be positive.');
+end
+
+dims = double(dims(:)');
+end
+
+function out = describe_x_axis_range_request(value)
+if isempty(value)
+    out = 'full data range';
+    return;
+end
+
+vals = parse_x_axis_range_request(value);
+if isempty(vals)
+    out = 'full data range';
+elseif isscalar(vals)
+    out = sprintf('%.3f ms from data start', vals);
+else
+    vals = sort(vals);
+    out = sprintf('%.3f to %.3f ms', vals(1), vals(2));
+end
+end
+
+function limits = resolve_x_axis_limits(time_vector, value)
+limits = [];
+if isempty(value)
+    return;
+end
+if isempty(time_vector)
+    error('Cannot apply x_axis_range_ms because the timeline is empty.');
+end
+
+raw_vals = parse_x_axis_range_request(value);
+if isempty(raw_vals)
+    return;
+end
+
+data_limits = [min(time_vector) max(time_vector)];
+if isscalar(raw_vals)
+    if raw_vals <= 0
+        error('x_axis_range_ms duration must be > 0.');
+    end
+    raw_vals = [data_limits(1) data_limits(1) + raw_vals];
+end
+
+raw_vals = sort(double(raw_vals(:)'));
+if numel(raw_vals) ~= 2 || raw_vals(1) == raw_vals(2)
+    error('x_axis_range_ms must resolve to [start end] with different values.');
+end
+
+if raw_vals(2) < data_limits(1) || raw_vals(1) > data_limits(2)
+    error(['Requested x_axis_range_ms %.3f to %.3f is outside the data range ' ...
+           '(%.3f to %.3f).'], raw_vals(1), raw_vals(2), data_limits(1), data_limits(2));
+end
+
+clamped = [max(raw_vals(1), data_limits(1)), min(raw_vals(2), data_limits(2))];
+idx = find(time_vector >= clamped(1) & time_vector <= clamped(2));
+if isempty(idx)
+    error('x_axis_range_ms %.3f to %.3f has no samples in the timeline.', clamped(1), clamped(2));
+end
+
+if numel(idx) == 1
+    idx0 = idx(1);
+    idx1 = max(1, idx0 - 1);
+    idx2 = min(numel(time_vector), idx0 + 1);
+    if idx1 == idx2
+        error(['x_axis_range_ms %.3f to %.3f resolves to a single sample only. ' ...
+               'Please provide a wider range.'], clamped(1), clamped(2));
+    end
+    idx = [idx1 idx2];
+end
+
+limits = [time_vector(idx(1)) time_vector(idx(end))];
+if limits(1) >= limits(2)
+    error('x_axis_range_ms could not be resolved to an increasing x-axis range.');
+end
+end
+
+function vals = parse_x_axis_range_request(value)
+if isempty(value)
+    vals = [];
+    return;
+end
+
+if isnumeric(value)
+    vals = double(value(:)');
+elseif iscell(value)
+    if numel(value) ~= 1
+        error('x_axis_range_ms cell input must contain exactly one value or range.');
+    end
+    vals = parse_x_axis_range_request(value{1});
+    return;
+elseif isstring(value)
+    if ~isscalar(value)
+        error('x_axis_range_ms string input must be scalar.');
+    end
+    vals = parse_x_axis_range_request(char(value));
+    return;
+elseif ischar(value)
+    raw = strtrim(value);
+    if isempty(raw)
+        vals = [];
+        return;
+    end
+    raw = regexprep(raw, '(?i)\bms\b', '');
+    raw = regexprep(raw, '(?i)\bto\b', '-');
+    raw = strrep(raw, sprintf('\n'), ' ');
+
+    if contains(raw, ';')
+        error(['x_axis_range_ms must be a single range or scalar duration. ' ...
+               'Examples: "0-800" or "800".']);
+    end
+
+    pair_tokens = regexp(raw, '^\s*([+-]?\d*\.?\d+)\s*[-,:]\s*([+-]?\d*\.?\d+)\s*$', ...
+        'tokens', 'once');
+    if isempty(pair_tokens)
+        pair_tokens = regexp(raw, '^\s*([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)\s*$', ...
+            'tokens', 'once');
+    end
+
+    if ~isempty(pair_tokens)
+        vals = [str2double(pair_tokens{1}) str2double(pair_tokens{2})];
+    else
+        number_tokens = regexp(raw, '[+-]?\d*\.?\d+', 'match');
+        if isempty(number_tokens)
+            error(['Could not parse x_axis_range_ms "%s". Use [start end], "start-end", ' ...
+                   'or a scalar duration in ms.'], raw);
+        end
+        vals = str2double(number_tokens);
+    end
+else
+    error('x_axis_range_ms must be empty, numeric, or a parseable string.');
+end
+
+if any(~isfinite(vals))
+    error('x_axis_range_ms contains non-numeric values.');
+end
+if numel(vals) ~= 1 && numel(vals) ~= 2
+    error('x_axis_range_ms must resolve to one value (duration) or two values ([start end]).');
+end
+
+vals = double(vals(:)');
+end
+
+function vals = parse_numeric_vector_argument(value, arg_name)
+if nargin < 2 || isempty(arg_name)
+    arg_name = 'value';
+end
+
+if isnumeric(value)
+    vals = double(value(:)');
+elseif ischar(value) || (isstring(value) && isscalar(value))
+    raw = strtrim(char(value));
+    if isempty(raw)
+        vals = [];
+    else
+        raw = strrep(raw, sprintf('\n'), ' ');
+        number_tokens = regexp(raw, '[+-]?\d*\.?\d+', 'match');
+        if isempty(number_tokens)
+            error('Could not parse numeric values for %s from "%s".', arg_name, raw);
+        end
+        vals = str2double(number_tokens);
+    end
+elseif isstring(value)
+    vals = [];
+    for i = 1:numel(value)
+        vals = [vals parse_numeric_vector_argument(char(value(i)), arg_name)]; %#ok<AGROW>
+    end
+elseif iscell(value)
+    vals = [];
+    for i = 1:numel(value)
+        vals = [vals parse_numeric_vector_argument(value{i}, arg_name)]; %#ok<AGROW>
+    end
+else
+    error('%s must be numeric or a parseable string.', arg_name);
+end
+
+if any(~isfinite(vals))
+    error('%s contains non-finite values.', arg_name);
+end
 end
 
 function [condition_order, resolved_source] = resolve_condition_order(input_folder, condition_order_source)
@@ -412,12 +840,13 @@ for i = 1:numel(candidate_paths)
 end
 
 error(['Found condition_order candidate files, but none could be parsed. ' ...
-       'Please provide condition_order_source explicitly.']);
+       'Provide condition_order_source explicitly.']);
 end
 
 function [condition_order, resolved_source] = load_condition_order_any(path_value)
 condition_order = {};
 resolved_source = '';
+path_value = normalize_input_folder(path_value);
 
 if exist(path_value, 'file')
     condition_order = load_condition_order_file(path_value);
@@ -494,8 +923,6 @@ switch ext
         end
     case '.txt'
         condition_order = parse_condition_order_text_file(file_path);
-    otherwise
-        condition_order = {};
 end
 end
 
@@ -571,10 +998,7 @@ end
 function idx = find_condition_index(condition_order, label)
 idx = find(strcmp(condition_order, label), 1, 'first');
 if isempty(idx)
-    idx_case = find(strcmpi(condition_order, label), 1, 'first');
-    if ~isempty(idx_case)
-        idx = idx_case;
-    end
+    idx = find(strcmpi(condition_order, label), 1, 'first');
 end
 end
 
@@ -591,8 +1015,8 @@ end
 raw_data = double(raw_data);
 if ndims(raw_data) == 4
     if size(raw_data, 3) ~= 1
-        error(['Expected single-subject parameter data with singleton 3rd dimension in %s. ' ...
-               'Found size: %s'], source_file, mat2str(size(raw_data)));
+        error(['Expected singleton 3rd dimension in %s, found size: %s'], ...
+            source_file, mat2str(size(raw_data)));
     end
     raw_data = squeeze(raw_data);
 end
@@ -628,13 +1052,6 @@ if isfield(loaded, 'Data') && isstruct(loaded.Data) && ...
             isfinite(double(limo_data.sampling_rate)) && double(limo_data.sampling_rate) > 0
         step_ms = 1000 / double(limo_data.sampling_rate);
         time_vector = double(limo_data.start) + (0:(n_timepoints - 1)) * step_ms;
-        return;
-    end
-
-    if isfield(limo_data, 'start') && isfield(limo_data, 'end') && ...
-            isnumeric(limo_data.start) && isnumeric(limo_data.end) && ...
-            isfinite(double(limo_data.start)) && isfinite(double(limo_data.end))
-        time_vector = linspace(double(limo_data.start), double(limo_data.end), n_timepoints);
         return;
     end
 end
@@ -820,6 +1237,107 @@ for s = 1:n_subjects_local
 end
 end
 
+function sem_by_condition = compute_within_subject_sem_by_condition(channel_data_by_condition, single_subject_trial_sem_by_condition)
+n_conditions_local = numel(channel_data_by_condition);
+sem_by_condition = cell(n_conditions_local, 1);
+if n_conditions_local == 0
+    return;
+end
+
+if nargin < 2 || isempty(single_subject_trial_sem_by_condition)
+    single_subject_trial_sem_by_condition = cell(n_conditions_local, 1);
+end
+
+first_data = channel_data_by_condition{1};
+if isempty(first_data)
+    return;
+end
+
+n_timepoints_local = size(first_data, 2);
+n_subjects_local = size(first_data, 3);
+cond_values = nan(n_subjects_local, n_conditions_local, n_timepoints_local);
+
+for c = 1:n_conditions_local
+    data = channel_data_by_condition{c};
+    if isempty(data)
+        continue;
+    end
+
+    data = squeeze(data);
+    if isempty(data)
+        continue;
+    end
+
+    if isvector(data) && n_subjects_local == 1 && numel(data) == n_timepoints_local
+        data = data(:)';
+    end
+
+    if size(data, 1) == n_timepoints_local && size(data, 2) == n_subjects_local
+        values = data';
+    elseif size(data, 2) == n_timepoints_local && size(data, 1) == n_subjects_local
+        values = data;
+    else
+        values = reshape(data, n_timepoints_local, n_subjects_local)';
+    end
+
+    cond_values(:, c, :) = values;
+end
+
+if n_subjects_local == 1
+    for c = 1:n_conditions_local
+        sem = [];
+        if numel(single_subject_trial_sem_by_condition) >= c
+            sem = single_subject_trial_sem_by_condition{c};
+        end
+
+        if isempty(sem)
+            sem = nan(1, n_timepoints_local);
+        else
+            sem = squeeze(sem);
+            sem = sem(:)';
+            if numel(sem) ~= n_timepoints_local
+                sem = nan(1, n_timepoints_local);
+            end
+        end
+
+        sem_by_condition{c} = sem;
+    end
+    return;
+end
+
+if n_conditions_local == 1
+    sem = nan(1, n_timepoints_local);
+    for t = 1:n_timepoints_local
+        vals = cond_values(:, 1, t);
+        vals = vals(isfinite(vals));
+        if numel(vals) >= 2
+            sem(t) = std(vals, 0) / sqrt(numel(vals));
+        end
+    end
+    sem_by_condition{1} = sem;
+    return;
+end
+
+for c = 1:n_conditions_local
+    sem = nan(1, n_timepoints_local);
+    for t = 1:n_timepoints_local
+        vals = squeeze(cond_values(:, :, t));
+        subject_mean = mean(vals, 2, 'omitnan');
+        grand_mean = mean(vals(:), 'omitnan');
+        if ~isfinite(grand_mean)
+            continue;
+        end
+
+        normalized = vals(:, c) - subject_mean + grand_mean;
+        normalized = normalized(isfinite(normalized));
+        if numel(normalized) >= 2
+            sem(t) = std(normalized, 0) / sqrt(numel(normalized));
+        end
+    end
+    sem_by_condition{c} = sem;
+end
+end
+
 function stats_info = init_stats_struct()
 stats_info = struct();
 stats_info.requested = false;
@@ -836,6 +1354,10 @@ stats_info.mean_diff = nan;
 stats_info.std_diff = nan;
 stats_info.cohens_dz = nan;
 stats_info.n_pairs = 0;
+stats_info.n_observations = 0;
+stats_info.n_within_pairs = 0;
+stats_info.test_label = '';
+stats_info.single_subject_id = '';
 stats_info.condition_1 = '';
 stats_info.condition_2 = '';
 stats_info.included_subject_ids = {};
@@ -845,11 +1367,18 @@ stats_info.resolved_time_window = [nan nan];
 end
 
 function stats_info = run_window_stats_for_window(subject_window_means, subject_ids, ...
-    trial_type_values, resolved_window)
+    trial_type_values, resolved_window, all_data_by_condition, window_idx)
 stats_info = init_stats_struct();
 stats_info.requested = true;
 stats_info.requested_time_window = resolved_window;
 stats_info.resolved_time_window = resolved_window;
+
+if nargin < 5
+    all_data_by_condition = {};
+end
+if nargin < 6
+    window_idx = [];
+end
 
 n_conditions_local = size(subject_window_means, 2);
 if n_conditions_local ~= 2
@@ -868,13 +1397,28 @@ stats_info.n_pairs = sum(valid_mask);
 stats_info.included_subject_ids = subject_ids(valid_mask);
 stats_info.excluded_subject_ids = subject_ids(~valid_mask);
 
-if stats_info.n_pairs < 2
-    stats_info.reason = sprintf('Need at least 2 paired subjects for t-test (found %d).', stats_info.n_pairs);
+if stats_info.n_pairs == 0
+    stats_info.reason = 'No subjects had valid paired condition data.';
     return;
 end
 
-paired_1 = v1(valid_mask);
-paired_2 = v2(valid_mask);
+if stats_info.n_pairs == 1
+    [paired_1, paired_2] = extract_single_subject_window_pairs(all_data_by_condition, window_idx, valid_mask);
+    stats_info.single_subject_id = subject_ids{find(valid_mask, 1, 'first')};
+    stats_info.n_within_pairs = numel(paired_1);
+    stats_info.n_observations = stats_info.n_within_pairs;
+    stats_info.test_label = 'Within-subject paired t-test (single-subject fallback)';
+    if stats_info.n_within_pairs < 2
+        stats_info.reason = sprintf(['Single-subject fallback requires at least 2 paired channel-time samples ' ...
+            '(found %d).'], stats_info.n_within_pairs);
+        return;
+    end
+else
+    paired_1 = v1(valid_mask);
+    paired_2 = v2(valid_mask);
+    stats_info.n_observations = numel(paired_1);
+    stats_info.test_label = 'Paired t-test across subjects';
+end
 
 stats_info.mean_condition_1 = mean(paired_1, 'omitnan');
 stats_info.mean_condition_2 = mean(paired_2, 'omitnan');
@@ -892,10 +1436,37 @@ try
     stats_info.p_value = p;
     stats_info.t_stat = stats.tstat;
     stats_info.df = stats.df;
-    stats_info.reason = 'Paired t-test completed.';
+    stats_info.reason = sprintf('%s completed.', stats_info.test_label);
 catch ME
     stats_info.reason = sprintf('ttest failed: %s', ME.message);
 end
+end
+
+function [paired_1, paired_2] = extract_single_subject_window_pairs(all_data_by_condition, window_idx, valid_mask)
+paired_1 = [];
+paired_2 = [];
+
+if numel(all_data_by_condition) < 2 || isempty(window_idx)
+    return;
+end
+
+subject_idx = find(valid_mask, 1, 'first');
+if isempty(subject_idx)
+    return;
+end
+
+if subject_idx > size(all_data_by_condition{1}, 3) || subject_idx > size(all_data_by_condition{2}, 3)
+    return;
+end
+
+data_1 = all_data_by_condition{1}(:, window_idx, subject_idx);
+data_2 = all_data_by_condition{2}(:, window_idx, subject_idx);
+
+flat_1 = data_1(:);
+flat_2 = data_2(:);
+keep = isfinite(flat_1) & isfinite(flat_2);
+paired_1 = flat_1(keep);
+paired_2 = flat_2(keep);
 end
 
 function txt = build_stats_annotation(stats_by_window)
@@ -926,9 +1497,15 @@ for w = 1:numel(stats_by_window)
         sig_word = 'n.s.';
     end
 
-    lines{w} = sprintf('%s: t(%d)=%.3f, p=%.4g, n=%d (%s)', ...
-        window_label, round(stats_info.df), stats_info.t_stat, ...
-        stats_info.p_value, stats_info.n_pairs, sig_word);
+    if stats_info.n_pairs == 1 && stats_info.n_within_pairs > 0
+        lines{w} = sprintf('%s: t(%d)=%.3f, p=%.4g, 1 subj (%d pts, %s)', ...
+            window_label, round(stats_info.df), stats_info.t_stat, ...
+            stats_info.p_value, stats_info.n_within_pairs, sig_word);
+    else
+        lines{w} = sprintf('%s: t(%d)=%.3f, p=%.4g, n=%d (%s)', ...
+            window_label, round(stats_info.df), stats_info.t_stat, ...
+            stats_info.p_value, stats_info.n_pairs, sig_word);
+    end
 end
 
 txt = strjoin(lines, sprintf('\n'));
@@ -953,6 +1530,262 @@ elseif any(performed_mask)
 else
     txt_color = [0.22 0.22 0.22];
     bg_color = [0.95 0.95 0.95];
+end
+end
+
+function out = normalize_figure_title_text(raw_title)
+out = strtrim(char(raw_title));
+out = regexprep(out, '(?i)\btrial_type\b', 'Trial Type');
+out = strrep(out, '_', ' ');
+out = regexprep(out, '\s+', ' ');
+out = strtrim(out);
+end
+
+function out = format_display_label(raw_label)
+out = normalize_label_value(raw_label);
+out = strrep(out, '_', ' ');
+out = strrep(out, '-', ' ');
+out = regexprep(out, '\s+', ' ');
+out = strtrim(out);
+if isempty(out)
+    return;
+end
+
+words = strsplit(lower(out), ' ');
+for i = 1:numel(words)
+    token = words{i};
+    if isempty(token)
+        continue;
+    end
+    words{i} = [upper(token(1)) token(2:end)]; %#ok<AGROW>
+end
+out = strjoin(words, ' ');
+end
+
+function out = compose_plot_title(base_title, channels_in_use, is_single_subject, trial_type_display_values)
+if nargin < 3
+    is_single_subject = false; %#ok<NASGU>
+end
+if nargin < 4
+    trial_type_display_values = {};
+end
+
+cond_tokens = trial_type_display_values;
+if ischar(cond_tokens) || (isstring(cond_tokens) && isscalar(cond_tokens))
+    cond_tokens = {char(cond_tokens)};
+end
+if ~iscell(cond_tokens)
+    cond_tokens = {};
+end
+cond_tokens = cond_tokens(~cellfun(@isempty, cond_tokens));
+if isempty(cond_tokens)
+    condition_text = normalize_figure_title_text(base_title);
+else
+    condition_text = strjoin(cond_tokens, ' vs ');
+end
+
+electrode_text = format_electrode_text(channels_in_use);
+if isempty(electrode_text)
+    out = condition_text;
+else
+    out = sprintf('%s - %s', condition_text, electrode_text);
+end
+end
+
+function out = format_electrode_text(channels_in_use)
+if isempty(channels_in_use)
+    out = '';
+    return;
+end
+tokens = arrayfun(@channel_display_name, channels_in_use, 'UniformOutput', false);
+if numel(tokens) == 1
+    out = tokens{1};
+else
+    out = strjoin(tokens, ', ');
+end
+end
+
+function out = channel_display_name(channel_idx)
+switch double(channel_idx)
+    case 21
+        out = 'Fz';
+    case 87
+        out = 'P3';
+    otherwise
+        out = sprintf('E%d', channel_idx);
+end
+end
+
+function set_data_driven_ylim(ax, plotted_curves)
+if isempty(plotted_curves)
+    return;
+end
+y_vals = plotted_curves(:);
+y_vals = y_vals(isfinite(y_vals));
+if isempty(y_vals)
+    return;
+end
+
+y_vals(end+1) = 0; %#ok<AGROW>
+y_min = min(y_vals);
+y_max = max(y_vals);
+
+if ~isfinite(y_min) || ~isfinite(y_max)
+    return;
+end
+
+if y_max <= y_min
+    pad = max(abs(y_min) * 0.1, 1);
+    ylim(ax, [y_min - pad, y_max + pad]);
+    return;
+end
+
+span = y_max - y_min;
+ylim(ax, [y_min - 0.08 * span, y_max + 0.20 * span]);
+end
+
+function apply_font_scale(fig, scale_factor)
+if nargin < 2 || isempty(scale_factor) || ~isscalar(scale_factor) || ~isfinite(scale_factor) || scale_factor <= 0
+    return;
+end
+objs = findall(fig, '-property', 'FontSize');
+for i = 1:numel(objs)
+    fs = get(objs(i), 'FontSize');
+    if isnumeric(fs) && isscalar(fs) && isfinite(fs) && fs > 0
+        set(objs(i), 'FontSize', fs * scale_factor);
+    end
+end
+end
+
+function adjust_ylim_for_legend_clearance(ax, legend_handle, x_data, plotted_curves)
+if isempty(plotted_curves) || isempty(x_data) || ~isgraphics(ax) || ~isgraphics(legend_handle)
+    return;
+end
+
+x_data = x_data(:)';
+if size(plotted_curves, 2) ~= numel(x_data)
+    return;
+end
+
+for iter = 1:4
+    drawnow;
+    [x1, x2, legend_bottom, rel_bottom, ok] = legend_bounds_in_data_units(ax, legend_handle);
+    if ~ok
+        return;
+    end
+
+    in_x = x_data >= x1 & x_data <= x2;
+    if ~any(in_x)
+        return;
+    end
+
+    y_vals = plotted_curves(:, in_x);
+    y_vals = y_vals(isfinite(y_vals));
+    if isempty(y_vals)
+        return;
+    end
+
+    y_peak = max(y_vals);
+    y_limits = ylim(ax);
+    y_span = y_limits(2) - y_limits(1);
+    if ~isfinite(y_span) || y_span <= 0
+        return;
+    end
+
+    clearance = 0.03 * y_span;
+    if y_peak <= (legend_bottom - clearance)
+        return;
+    end
+
+    if rel_bottom <= 0.02
+        new_top = y_limits(2) + 0.35 * y_span;
+    else
+        target_bottom = y_peak + clearance;
+        new_top = y_limits(1) + (target_bottom - y_limits(1)) / rel_bottom;
+    end
+
+    if ~isfinite(new_top) || new_top <= y_limits(2)
+        new_top = y_limits(2) + 0.35 * y_span;
+    end
+
+    ylim(ax, [y_limits(1), new_top]);
+end
+end
+
+function [x1, x2, y1, rel_y1, ok] = legend_bounds_in_data_units(ax, legend_handle)
+x1 = nan;
+x2 = nan;
+y1 = nan;
+rel_y1 = nan;
+ok = false;
+
+if ~isgraphics(ax) || ~isgraphics(legend_handle)
+    return;
+end
+
+ax_units = get(ax, 'Units');
+legend_units = get(legend_handle, 'Units');
+cleanup = onCleanup(@() restore_units(ax, legend_handle, ax_units, legend_units)); %#ok<NASGU>
+
+set(ax, 'Units', 'normalized');
+set(legend_handle, 'Units', 'normalized');
+
+ax_pos = get(ax, 'Position');
+legend_pos = get(legend_handle, 'Position');
+if ax_pos(3) <= 0 || ax_pos(4) <= 0
+    return;
+end
+
+rel_x1 = (legend_pos(1) - ax_pos(1)) / ax_pos(3);
+rel_x2 = (legend_pos(1) + legend_pos(3) - ax_pos(1)) / ax_pos(3);
+rel_y1 = (legend_pos(2) - ax_pos(2)) / ax_pos(4);
+
+rel_x1 = min(max(rel_x1, 0), 1);
+rel_x2 = min(max(rel_x2, 0), 1);
+rel_y1 = min(max(rel_y1, 0), 1);
+
+x_limits = xlim(ax);
+y_limits = ylim(ax);
+
+x1 = x_limits(1) + rel_x1 * (x_limits(2) - x_limits(1));
+x2 = x_limits(1) + rel_x2 * (x_limits(2) - x_limits(1));
+y1 = y_limits(1) + rel_y1 * (y_limits(2) - y_limits(1));
+ok = true;
+end
+
+function restore_units(ax, legend_handle, ax_units, legend_units)
+if isgraphics(ax)
+    set(ax, 'Units', ax_units);
+end
+if isgraphics(legend_handle)
+    set(legend_handle, 'Units', legend_units);
+end
+end
+
+function stretch_window_patches(window_patches, y_limits)
+if isempty(window_patches) || numel(y_limits) ~= 2 || ~all(isfinite(y_limits))
+    return;
+end
+
+for i = 1:numel(window_patches)
+    if ~isgraphics(window_patches(i))
+        continue;
+    end
+    x_data = get(window_patches(i), 'XData');
+    set(window_patches(i), 'YData', [y_limits(1) y_limits(1) y_limits(2) y_limits(2)]);
+    set(window_patches(i), 'XData', x_data);
+end
+end
+
+function rgb = window_highlight_color(stats_by_window, window_idx)
+rgb = [0.92 0.28 0.28]; % red: non-significant or not performed
+if numel(stats_by_window) < window_idx
+    return;
+end
+stats_info = stats_by_window(window_idx);
+if isfield(stats_info, 'performed') && isfield(stats_info, 'significant') && ...
+        logical(stats_info.performed) && logical(stats_info.significant)
+    rgb = [0.20 0.82 0.20]; % green: significant
 end
 end
 
@@ -1042,11 +1875,16 @@ else
         fprintf(fid, '    reason: %s\n', stats_info.reason);
 
         if stats_info.performed
-            fprintf(fid, '    test: paired t-test\n');
+            fprintf(fid, '    test: %s\n', stats_info.test_label);
             fprintf(fid, '    alpha: %.3f\n', stats_info.alpha);
             fprintf(fid, '    condition_1: %s\n', stats_info.condition_1);
             fprintf(fid, '    condition_2: %s\n', stats_info.condition_2);
             fprintf(fid, '    n_pairs: %d\n', stats_info.n_pairs);
+            fprintf(fid, '    n_observations: %d\n', stats_info.n_observations);
+            if stats_info.n_within_pairs > 0
+                fprintf(fid, '    n_within_pairs: %d\n', stats_info.n_within_pairs);
+                fprintf(fid, '    single_subject_id: %s\n', stats_info.single_subject_id);
+            end
             fprintf(fid, '    t(%d)=%.8f\n', round(stats_info.df), stats_info.t_stat);
             fprintf(fid, '    p_value=%.10g\n', stats_info.p_value);
             fprintf(fid, '    significant: %s\n', logical_to_yesno(stats_info.significant));
@@ -1078,6 +1916,14 @@ if value
     out = 'yes';
 else
     out = 'no';
+end
+end
+
+function out = logical_to_onoff(value)
+if value
+    out = 'on';
+else
+    out = 'off';
 end
 end
 

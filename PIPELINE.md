@@ -148,6 +148,8 @@ hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
 ```
 
 Inputs:
@@ -172,6 +174,17 @@ Inputs:
   - accepts logical values (`true/false`, `1/0`, `yes/no`, `on/off`)
   - when `true`, plots basic within-subject SEM shading per condition
   - for single-subject runs, SEM shading falls back to trial-level SEM per condition/channel/timepoint
+- optional `plot_dimensions`: figure position `[left bottom width height]`
+  - default: `[100 100 1200 700]`
+  - accepts numeric vectors or parseable strings
+  - for `sbatch --export`, space-delimited values are safest (commas may need escaping)
+- optional `x_axis_range_ms`: x-axis range in milliseconds
+  - default: full timeline
+  - accepts:
+    - explicit range: `[start end]`, `'start-end'`, `'start,end'`, or `'start end'`
+    - scalar duration in ms: for example `800` means from data start to data start + 800 ms
+  - for `sbatch --export`, hyphen/space-delimited values are safest (commas may need escaping)
+  - requested values are clamped to the available data range
 
 Outputs:
 - if one channel is requested:
@@ -184,6 +197,19 @@ Outputs:
   - `erp_plots/grand_average_erp_<trial_types>_E<channel>.svg`
   - `erp_plots/grand_average_erp_<trial_types>_E<channel>.mat`
   - `erp_plots/grand_average_erp_<trial_types>_E<channel>_stats_<timestamp>.txt`
+
+Single-subject parameter-means variant (same plotting controls):
+
+```matlab
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
+```
 
 ### 4B) LIMO First Level
 
@@ -283,7 +309,7 @@ For organized runs, override `--output` and `--error` at submission time.
 - `hpc_epoch_to_erp_plot.slurm`
   - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`, `CHANNELS_CSV`
     - `TRIAL_TYPES_CSV` supports comma/semicolon separators (semicolon preferred for `sbatch --export`)
-  - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`, `SHOW_ERROR_BARS`
+  - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`, `SHOW_ERROR_BARS`, `PLOT_DIMENSIONS`, `X_AXIS_RANGE_MS`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
 - `hpc_limo_second_level.slurm`
@@ -326,6 +352,8 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
   - `ERP_FIGURE_TITLE`
   - `ERP_TIME_WINDOW_MS` (optional window(s) for stats/highlight, example: `"300-500;600-800"`)
   - `ERP_SHOW_ERROR_BARS` (optional; default `true`; accepts true/false, 1/0, yes/no, on/off)
+  - `ERP_PLOT_DIMENSIONS` (optional figure position; default: `"100 100 1200 700"`)
+  - `ERP_X_AXIS_RANGE_MS` (optional x-axis range/duration in ms; examples: `"-100-1000"` or `"1100"`)
 - label-based contrasts in `COMPARISONS` (`key|label1|label2|title`)
 - subject-manifest generation from `RAW_INPUT/*.raw`
 - Stage 1-3 submission as SLURM arrays (`--array`) with throttles:
