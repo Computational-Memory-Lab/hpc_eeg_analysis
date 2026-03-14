@@ -13,6 +13,7 @@ set -euo pipefail
 RAW_INPUT="/home/devon7y/scratch/devon7y/mydata"
 PLOTS="/home/devon7y/scratch/devon7y/plots"
 SCRIPTS="/home/devon7y/scratch/devon7y/hpc_eeg_analysis"
+SUBJECT_ID="${SUBJECT_ID:-}"
 
 # ============================================================
 # ARRAY SETTINGS (Stages 1-3)
@@ -28,8 +29,8 @@ ARRAY_THROTTLE_STAGE3="24"
 VOLTAGE_DIFF="20"
 VOLTAGE_ABS="1000"
 EPOCH_WINDOW=""   # REQUIRED (seconds), example: "-0.1;1.5"
-EPOCH_TRIGGERS_CSV="11;21;22"  # semicolon preferred for sbatch --export safety
-EPOCH_GROUP_SPEC="SME:11;Test_Intact:21;Test_Recombined:22"
+EPOCH_TRIGGERS_CSV="11;21;22;31;32"  # semicolon preferred for sbatch --export safety
+EPOCH_GROUP_SPEC="SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32"
 CONDITION_ORDER=""  # optional: comma-separated labels; empty = infer from trial_type
 
 # ============================================================
@@ -87,6 +88,11 @@ fi
 
 if [[ "${RUN_EPOCH_ERP_BRANCH}" != "0" && "${RUN_EPOCH_ERP_BRANCH}" != "1" ]]; then
   echo "ERROR: RUN_EPOCH_ERP_BRANCH must be 0 or 1, got: ${RUN_EPOCH_ERP_BRANCH}" >&2
+  exit 1
+fi
+
+if [[ -n "${SUBJECT_ID}" ]]; then
+  echo "ERROR: submit_pipeline.sh does not support SUBJECT_ID. Use the stage wrappers directly for single-subject reruns." >&2
   exit 1
 fi
 

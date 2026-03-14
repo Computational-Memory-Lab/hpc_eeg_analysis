@@ -17,8 +17,8 @@
 # Optional controls (all overrideable via sbatch --export):
 #   VOLTAGE_DIFF, VOLTAGE_ABS
 #   EPOCH_WINDOW           REQUIRED, epoch window in seconds (for example "-0.1;1.5")
-#   EPOCH_TRIGGERS_CSV      e.g., "11;21;22" (semicolon preferred for sbatch --export)
-#   EPOCH_GROUP_SPEC        e.g., "SME:11;Test_Intact:21;Test_Recombined:22"
+#   EPOCH_TRIGGERS_CSV      e.g., "11;21;22;31;32" (semicolon preferred for sbatch --export)
+#   EPOCH_GROUP_SPEC        e.g., "SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32"
 # Optional subject scoping (for SLURM arrays):
 #   SUBJECT_ID=<numeric_id>
 #   SUBJECTS_FILE=<path_with_one_subject_id_per_line> + --array
@@ -27,8 +27,8 @@ INPUT_FOLDER="${INPUT_FOLDER:-/home/devon7y/scratch/devon7y/interpol}"
 VOLTAGE_DIFF="${VOLTAGE_DIFF:-20}"
 VOLTAGE_ABS="${VOLTAGE_ABS:-1000}"
 EPOCH_WINDOW="${EPOCH_WINDOW:-}"
-EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11;21;22}"
-EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC:-SME:11;Test_Intact:21;Test_Recombined:22}"
+EPOCH_TRIGGERS_CSV="${EPOCH_TRIGGERS_CSV:-11;21;22;31;32}"
+EPOCH_GROUP_SPEC="${EPOCH_GROUP_SPEC:-SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32}"
 SUBJECT_ID="${SUBJECT_ID:-}"
 SUBJECTS_FILE="${SUBJECTS_FILE:-}"
 
@@ -69,8 +69,7 @@ fi
 
 module load matlab/2023b
 
-matlab -nodisplay -nosplash -r "\
+matlab -batch "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-${MATLAB_CALL} \
-exit;"
+${MATLAB_CALL}"

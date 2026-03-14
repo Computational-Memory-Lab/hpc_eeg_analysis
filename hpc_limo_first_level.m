@@ -1,15 +1,19 @@
-function hpc_limo_first_level(input_folder, condition_order)
+function hpc_limo_first_level(input_folder, condition_order, subject_filter)
 % HPC_LIMO_FIRST_LEVEL - Run LIMO 1st level analysis on epoched EEG data
 %
 % Usage:
 %   hpc_limo_first_level(input_folder)
 %   hpc_limo_first_level(input_folder, condition_order)
+%   hpc_limo_first_level(input_folder, condition_order, subject_filter)
 %
 % Inputs:
 %   input_folder     - Path to the epoch folder containing *_epoch.set files
 %   condition_order  - Optional condition order used by std_makedesign.
 %                      Accepts cell array or CSV string.
 %                      Example: 'Study_hits,Study_misses,Test_hits,Test_misses'
+%   subject_filter   - Optional numeric subject ID.
+%                      This aggregate stage does not support subject-scoped runs.
+%                      Provide [] or omit it, and rerun Stage 4B on the full epoch folder.
 %
 % Outputs:
 %   - <parent_of_input_folder>/limo_first_level/
@@ -31,7 +35,17 @@ if nargin >= 2 && ~isempty(condition_order)
 else
     condition_order = {};
 end
+if nargin < 3
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
 input_folder = normalize_input_folder(input_folder);
+
+if ~isempty(subject_filter)
+    error(['subject_filter is not supported for hpc_limo_first_level. ' ...
+           'Re-run Stage 4B on the full epoch folder after any subject-scoped Stage 1-3 updates.']);
+end
 
 % Force headless MATLAB
 set(0, 'DefaultFigureVisible', 'off');
@@ -68,7 +82,7 @@ catch ME
     catch ME2
         disp('EEGLAB failed to start:');
         disp(getReport(ME2));
-        return;
+        rethrow(ME2);
     end
 end
 
@@ -202,7 +216,7 @@ try
 catch ME
     fprintf('ERROR: ERP precomputation failed:\n');
     disp(getReport(ME));
-    return;
+    rethrow(ME);
 end
 
 % Run LIMO 1st level analysis
@@ -216,6 +230,7 @@ try
 catch ME
     fprintf('ERROR: 1st level LIMO failed:\n');
     disp(getReport(ME));
+    rethrow(ME);
 end
 
 disp('Analysis complete.');
@@ -386,4 +401,30 @@ while ~feof(fid)
 end
 
 order = unique(order, 'stable');
+end
+
+function out = parse_optional_subject_filter(value)
+if isempty(value)
+    out = [];
+    return;
+end
+
+if isstring(value)
+    value = char(value);
+end
+
+if ischar(value)
+    value = strtrim(value);
+    if isempty(value)
+        out = [];
+        return;
+    end
+    value = str2double(value);
+end
+
+if ~(isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0)
+    error('subject_filter must be a finite integer subject ID.');
+end
+
+out = double(value);
 end

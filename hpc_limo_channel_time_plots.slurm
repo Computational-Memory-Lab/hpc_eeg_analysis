@@ -16,6 +16,10 @@
 # INPUT_FOLDER: a limo_second_level_<contrast_key>/ folder
 # OUTPUT_DIR:   folder where .png files will be saved
 #
+# SUBJECT_ID is intentionally unsupported for this aggregate stage.
+# Re-run plotting on the full second-level result folder after any
+# subject-scoped upstream updates.
+#
 # INPUT_FOLDER auto-resolution:
 #   If INPUT_FOLDER is not a second-level folder directly, this wrapper will
 #   try common layouts such as:
@@ -38,6 +42,12 @@ TOPOPLOT_TITLE="${TOPOPLOT_TITLE:-}"
 LR_TITLE="${LR_TITLE:-}"
 TOPOPLOT_LAYOUT="${TOPOPLOT_LAYOUT:-grid}"
 TOPOPLOT_STEP_MS="${TOPOPLOT_STEP_MS:-100}"
+SUBJECT_ID="${SUBJECT_ID:-}"
+
+if [[ -n "${SUBJECT_ID}" ]]; then
+  echo "ERROR: SUBJECT_ID is not supported for hpc_limo_channel_time_plots.slurm. Re-run plots on the full second-level folder." >&2
+  exit 1
+fi
 
 has_second_level_artifacts() {
   local dir="$1"
@@ -84,9 +94,8 @@ module load matlab/2023b
 # too small for large SVG scene serialization and can trigger Java GC/OOM.
 export JAVA_TOOL_OPTIONS="-Xmx8g"
 
-matlab -nodisplay -nosplash -r "\
+matlab -batch "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1/plugins/limo_tools-3.4/'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_limo_channel_time_plots('${INPUT_FOLDER}', '${OUTPUT_DIR}', getenv('TITLE_BASE'), getenv('CHANNEL_TIME_TITLE'), getenv('TOPOPLOT_TITLE'), getenv('LR_TITLE'), getenv('TOPOPLOT_LAYOUT'), getenv('TOPOPLOT_STEP_MS')); \
-exit;"
+hpc_limo_channel_time_plots('${INPUT_FOLDER}', '${OUTPUT_DIR}', getenv('TITLE_BASE'), getenv('CHANNEL_TIME_TITLE'), getenv('TOPOPLOT_TITLE'), getenv('LR_TITLE'), getenv('TOPOPLOT_LAYOUT'), getenv('TOPOPLOT_STEP_MS'));"

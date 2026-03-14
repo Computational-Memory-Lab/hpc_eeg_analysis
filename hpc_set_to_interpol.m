@@ -313,6 +313,16 @@ for file_idx = 1:length(files_to_process)
     end
     fprintf('  Remaining channels: %d\n\n', EEG.nbchan);
 
+    % Reload channel locations for the channels that survived RANSAC.
+    % clean_channels removes channels from EEG.data but does not update
+    % EEG.chanlocs, causing eeg_checkset to auto-clear chanlocs on the
+    % next pop_saveset call.  Reassign from the already-updated
+    % original_channel_indices to prevent ICLabel from failing later.
+    if numel(original_channel_indices) == EEG.nbchan
+        EEG.chanlocs = all_chanlocs(original_channel_indices);
+        fprintf('  Reloaded channel locations for %d post-RANSAC channels\n\n', EEG.nbchan);
+    end
+
     % Save checkpoint before ICA
     before_amica_filename = sprintf('before_step9_amica_%d.set', subject_id);
     EEG = pop_saveset(EEG, 'filename', before_amica_filename, 'filepath', interpol_folder);
@@ -379,6 +389,19 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Remaining components: %d\n', size(EEG.icaweights, 1));
     fprintf('  Back-projected to channel space\n\n');
 
+    % Record ICA stats before clearing the decomposition fields.
+    % ICA has been fully applied (back-projected); retaining icaweights/icachansind
+    % after channel interpolation causes EEGLAB to silently remove the decomposition
+    % in pop_reref because icachansind no longer covers all channels.
+    n_ica_computed = size(EEG.icaweights, 1) + num_rejected_ics;
+    n_ica_retained = size(EEG.icaweights, 1);
+    EEG.icaweights  = [];
+    EEG.icasphere   = [];
+    EEG.icachansind = [];
+    EEG.icawinv     = [];
+    if isfield(EEG, 'icaact'), EEG.icaact = []; end
+    fprintf('  ICA fields cleared (decomposition already applied; prevents rereferencing mismatch)\n\n');
+
     %% ASR - ARTIFACT SUBSPACE RECONSTRUCTION
     fprintf('STEP 12: ASR - Artifact Subspace Reconstruction...\n');
     fprintf('  Method: Temporal burst artifact correction\n');
@@ -442,9 +465,9 @@ for file_idx = 1:length(files_to_process)
         '';
         '  ICA decomposition:';
         '    Method:                Extended Infomax (runica)';
-        sprintf('    Components computed:   %d', size(EEG.icaweights, 1) + num_rejected_ics);
+        sprintf('    Components computed:   %d', n_ica_computed);
         sprintf('    Artifact ICs removed:  %d', num_rejected_ics);
-        sprintf('    Retained ICs:          %d', size(EEG.icaweights, 1));
+        sprintf('    Retained ICs:          %d', n_ica_retained);
         '';
         sprintf('  ASR correction:          %.2f%% RMS change', percent_changed);
         '';

@@ -7,7 +7,7 @@ This pipeline now supports general experiments by using:
 - configurable epoch trigger logic
 - an optional post-epoch ERP plotting branch
 - condition-name driven second-level contrasts
-- subject-scoped execution for Stages 1-3 (for SLURM arrays)
+- subject-scoped execution for Stages 1-4A (Stages 4B-6 remain aggregate-only)
 
 ---
 
@@ -42,6 +42,22 @@ raw_input_folder (contains *.raw, session *.log, *.eeglog)
 .../limo_second_level_<output_tag>/
   -> hpc_limo_channel_time_plots(second_level_folder, output_dir)
 ```
+
+---
+
+## Experiment Trigger Codes
+
+| Code | Phase | Meaning |
+|------|-------|---------|
+| 11 | Study | Pair onset (always; correct/incorrect not applicable) |
+| 21 | ASSOC test | Correct response (hit or correct rejection) |
+| 22 | ASSOC test | Incorrect response (miss or false alarm) |
+| 31 | ITEM test | Correct response (hit or correct rejection) |
+| 32 | ITEM test | Incorrect response (miss or false alarm) |
+
+Default `EPOCH_TRIGGERS_CSV`: `11;21;22;31;32`
+
+Default `EPOCH_GROUP_SPEC`: `SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32`
 
 ---
 
@@ -124,11 +140,11 @@ Parameters:
   - examples: `[-0.1 1.5]`, `'-0.1,1.5'`, `'-0.1 1.5'`, `'-0.1;1.5'`
   - for `sbatch --export`, semicolon separator (`;`) is safer than comma
 - `epoch_triggers`: which trigger codes to epoch around (defines which trials are created), accepts cell/numeric/CSV
-  - examples: `{'11','21','22'}`, `'11,21,22'`, or `'11;21;22'`
+  - examples: `{'11','21','22','31','32'}`, `'11,21,22,31,32'`, or `'11;21;22;31;32'`
   - for `sbatch --export`, semicolon separator (`;`) is safer than comma
 - `group_spec`: how already-epoched trials are grouped for artifact rejection thresholds/counting
-  - string form: `'SME:11;Test_Intact:21;Test_Recombined:22'`
-  - cell form: `{'SME', {'11'}; 'Test', {'21','22'}}`
+  - string form: `'SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32'`
+  - cell form: `{'SME', {'11'}; 'Test_Assoc', {'21','22'}}`
   - practical rule: group triggers should be a subset of `epoch_triggers`
 - `subject_filter`: optional numeric ID to process one subject only
 
@@ -150,6 +166,7 @@ hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, fig
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions)
 hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
+hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 ```
 
 Inputs:
@@ -185,6 +202,8 @@ Inputs:
     - scalar duration in ms: for example `800` means from data start to data start + 800 ms
   - for `sbatch --export`, hyphen/space-delimited values are safest (commas may need escaping)
   - requested values are clamped to the available data range
+- optional `subject_filter`: numeric subject ID to limit plotting to one `<ID>_epoch.set`
+  - useful for diagnostic or subject-specific ERP plots without copying files into a separate folder
 
 Outputs:
 - if one channel is requested:
@@ -209,18 +228,30 @@ hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, 
 hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars)
 hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions)
 hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
+hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 ```
+
+`subject_filter`:
+- optional numeric subject ID argument accepted for interface consistency
+- non-empty values are intentionally rejected
+- this utility only sees subject row order inside `parameter_<N>_single_subjects_Mean.mat`; it does not preserve real subject IDs like `1001`
 
 ### 4B) LIMO First Level
 
 ```matlab
 hpc_limo_first_level(input_folder)
 hpc_limo_first_level(input_folder, condition_order)
+hpc_limo_first_level(input_folder, condition_order, subject_filter)
 ```
 
 `condition_order`:
 - optional CSV/cell order for design mapping
 - if omitted/empty, inferred from `trial_type`
+
+`subject_filter`:
+- optional numeric subject ID argument accepted for interface consistency
+- non-empty values are intentionally rejected
+- Stage 4B builds aggregate first-level outputs, so rerun it on the full epoch folder after any subject-scoped Stage 1-3 updates
 
 Outputs:
 - `limo_first_level/PairAsso_Epoched.study`
@@ -234,6 +265,7 @@ Outputs:
 hpc_limo_second_level(input_folder, [p1 p2])
 hpc_limo_second_level(input_folder, {'ConditionA','ConditionB'})
 hpc_limo_second_level(input_folder, contrast, output_tag)
+hpc_limo_second_level(input_folder, contrast, output_tag, subject_filter)
 ```
 
 Contrast modes:
@@ -241,6 +273,11 @@ Contrast modes:
 - condition labels `{'ConditionA','ConditionB'}` (preferred)
 
 When labels are used, indices are resolved from `condition_order.mat/txt`.
+
+`subject_filter`:
+- optional numeric subject ID argument accepted for interface consistency
+- non-empty values are intentionally rejected
+- Stage 5 is a group-level aggregate stage and must be rerun on the full first-level folder after upstream subject updates
 
 Outputs:
 - `limo_second_level_<output_tag>/`
@@ -254,6 +291,8 @@ hpc_limo_channel_time_plots(input_folder, output_dir, title_base)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms)
+hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms, subject_filter)
 ```
 
 Input:
@@ -268,6 +307,10 @@ Input:
   - `grid`: near-square arrangement
   - `zigzag`: staggered left-to-right zigzag line
   - `line`: single horizontal row
+- optional `topoplot_step_ms`: topoplot interval in ms (default `100`)
+- optional `subject_filter`:
+  - accepted for interface consistency
+  - non-empty values are intentionally rejected because Stage 6 visualizes aggregate second-level results
 
 Output:
 - channel-time and topoplot `.png` files in `output_dir`
@@ -291,6 +334,7 @@ Before launching Stage 5 or Stage 6 manually, validate the actual upstream folde
 Each SLURM script accepts environment-variable overrides via `sbatch --export`.
 By default, script headers write to `/home/devon7y/scratch/devon7y/logs/`.
 For organized runs, override `--output` and `--error` at submission time.
+The wrappers use `matlab -batch`, so uncaught MATLAB errors propagate to non-zero SLURM exit codes and work correctly with `afterok`.
 
 - `hpc_raw_to_set.slurm`
   - `INPUT_FOLDER`
@@ -309,16 +353,20 @@ For organized runs, override `--output` and `--error` at submission time.
 - `hpc_epoch_to_erp_plot.slurm`
   - `INPUT_FOLDER`, `TRIAL_TYPES_CSV`, `CHANNELS_CSV`
     - `TRIAL_TYPES_CSV` supports comma/semicolon separators (semicolon preferred for `sbatch --export`)
+  - optional subject scope: `SUBJECT_ID`
   - optional: `OUTPUT_DIR`, `FIGURE_TITLE`, `TIME_WINDOW_MS`, `SHOW_ERROR_BARS`, `PLOT_DIMENSIONS`, `X_AXIS_RANGE_MS`
 - `hpc_limo_first_level.slurm`
   - `INPUT_FOLDER`, `CONDITION_ORDER` (empty allowed)
+  - `SUBJECT_ID` is intentionally rejected for this aggregate stage
 - `hpc_limo_second_level.slurm`
   - label mode: `C1_LABEL`, `C2_LABEL`, `CONTRAST_KEY`
   - numeric mode: `P1`, `P2`, `CONTRAST_KEY`
+  - `SUBJECT_ID` is intentionally rejected for this aggregate stage
   - wrapper validates/resolves `INPUT_FOLDER` to a real first-level folder containing `*.study` + `derivatives/`
     - supports common layouts: `<run>/limo_first_level` and `<run>/epoch/limo_first_level`
 - `hpc_limo_channel_time_plots.slurm`
   - `INPUT_FOLDER`, `OUTPUT_DIR`
+  - `SUBJECT_ID` is intentionally rejected for this aggregate stage
   - optional title overrides:
     - `TITLE_BASE`
     - `CHANNEL_TIME_TITLE`
@@ -341,7 +389,7 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 
 `submit_pipeline.sh` now supports:
 - configurable epoching (`EPOCH_WINDOW` required, plus `EPOCH_TRIGGERS_CSV`, `EPOCH_GROUP_SPEC`)
-  - `EPOCH_TRIGGERS_CSV` default is semicolon-separated (`11;21;22`) to avoid `sbatch --export` CSV splitting
+  - `EPOCH_TRIGGERS_CSV` default is semicolon-separated (`11;21;22;31;32`) to avoid `sbatch --export` CSV splitting
   - commas in Stage 3 env values are escaped and normalized by wrappers
 - optional explicit `CONDITION_ORDER`
 - optional Stage 4A ERP branch:
@@ -372,7 +420,10 @@ bash /home/devon7y/scratch/devon7y/hpc_eeg_analysis/submit_pipeline.sh
 Note:
 - `submit_pipeline.sh` always runs the LIMO branch after Stage 3.
 - It can also run the ERP branch in parallel when `RUN_EPOCH_ERP_BRANCH=1`.
+- `submit_pipeline.sh` rejects `SUBJECT_ID`; use stage wrappers directly for single-subject reruns.
 - You can still run only the ERP branch directly with `hpc_epoch_to_erp_plot.slurm`.
+- For single-subject reruns, use the stage wrappers directly through Stage 3 (and optionally Stage 4A).
+- After subject-scoped upstream reruns, rerun aggregate stages (4B/5/6) on the full folder.
 
 Monitor jobs:
 

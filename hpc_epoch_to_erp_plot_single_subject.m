@@ -1,4 +1,4 @@
-function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
+function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 % HPC_EPOCH_TO_ERP_PLOT_SINGLE_SUBJECT - Plot grand-average ERP curves by
 % trial_type using LIMO single-subject parameter files.
 %
@@ -11,6 +11,7 @@ function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars)
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions)
 %   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms)
+%   hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, condition_order_source, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 %
 % Inputs:
 %   input_folder      - Folder containing parameter_<N>_single_subjects_Mean.mat files.
@@ -36,6 +37,10 @@ function results = hpc_epoch_to_erp_plot_single_subject(input_folder, trial_type
 %                       Accepted formats:
 %                       - [start end], 'start-end', 'start,end', 'start end'
 %                       - scalar duration in ms (e.g., 800 => [data_start, data_start+800])
+%   subject_filter    - Optional numeric subject ID accepted for interface
+%                       consistency only. This utility does not preserve real
+%                       subject IDs; it only sees subject row order inside the
+%                       parameter_<N>_single_subjects_Mean.mat files.
 %
 % Outputs:
 %   - If one channel: same as before
@@ -72,6 +77,17 @@ if nargin < 9
 end
 if nargin < 10
     x_axis_range_ms = [];
+end
+if nargin < 11
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
+
+if ~isempty(subject_filter)
+    error(['subject_filter is not supported for hpc_epoch_to_erp_plot_single_subject. ' ...
+           'The single-subject parameter-mean files do not preserve real subject IDs, ' ...
+           'so filtering by SUBJECT_ID would be ambiguous.']);
 end
 
 % Backward compatibility: if arg7 is a logical flag, treat it as show_error_bars.
@@ -398,11 +414,14 @@ for ch = 1:n_channels_to_plot
         end
     end
 
-    xlabel(xlabel_text);
-    ylabel('Voltage (\muV)');
-    title(compose_plot_title(figure_title, channel_in_use, n_subjects == 1, trial_type_display_values), 'Interpreter', 'none');
+    xlabel_handle = xlabel(xlabel_text);
+    ylabel_handle = ylabel('Voltage (\muV)');
+    title_handle = title(compose_plot_title(figure_title, channel_in_use, n_subjects == 1, trial_type_display_values), 'Interpreter', 'none');
     legend_handle = legend(line_handles, legend_entries, 'Location', 'northeast', 'Interpreter', 'none');
-    apply_font_scale(fig, 1.20);
+    % Double text size relative to the previous plotting configuration.
+    apply_font_scale(fig, 2.40);
+    % Keep legend/ticks large, but bring title and axis labels down.
+    shrink_primary_label_fonts(title_handle, xlabel_handle, ylabel_handle, 0.50);
     adjust_ylim_for_legend_clearance(gca, legend_handle, time_vector, plotted_curves);
     if ~isempty(window_patches)
         stretch_window_patches(window_patches, ylim(gca));
@@ -1608,9 +1627,9 @@ end
 function out = channel_display_name(channel_idx)
 switch double(channel_idx)
     case 21
-        out = 'Fz';
+        out = 'E21/Fz';
     case 87
-        out = 'P3';
+        out = 'E87/P3';
     otherwise
         out = sprintf('E%d', channel_idx);
 end
@@ -1653,6 +1672,24 @@ for i = 1:numel(objs)
     fs = get(objs(i), 'FontSize');
     if isnumeric(fs) && isscalar(fs) && isfinite(fs) && fs > 0
         set(objs(i), 'FontSize', fs * scale_factor);
+    end
+end
+end
+
+function shrink_primary_label_fonts(title_handle, xlabel_handle, ylabel_handle, shrink_factor)
+if nargin < 4 || isempty(shrink_factor) || ~isscalar(shrink_factor) || ~isfinite(shrink_factor) || shrink_factor <= 0
+    return;
+end
+
+handles = [title_handle, xlabel_handle, ylabel_handle];
+for i = 1:numel(handles)
+    h = handles(i);
+    if ~isgraphics(h)
+        continue;
+    end
+    fs = get(h, 'FontSize');
+    if isnumeric(fs) && isscalar(fs) && isfinite(fs) && fs > 0
+        set(h, 'FontSize', fs * shrink_factor);
     end
 end
 end
@@ -2151,6 +2188,32 @@ elseif isnumeric(value)
 else
     out = '';
 end
+end
+
+function out = parse_optional_subject_filter(value)
+if isempty(value)
+    out = [];
+    return;
+end
+
+if isstring(value)
+    value = char(value);
+end
+
+if ischar(value)
+    value = strtrim(value);
+    if isempty(value)
+        out = [];
+        return;
+    end
+    value = str2double(value);
+end
+
+if ~(isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0)
+    error('subject_filter must be a finite integer subject ID.');
+end
+
+out = double(value);
 end
 
 function subject_label = parse_subject_label(filename)

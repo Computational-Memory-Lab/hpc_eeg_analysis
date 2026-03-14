@@ -3,6 +3,13 @@ You are setting up an EEG-processing Skill for an LLM coding agent that already 
 Context:
 - Project root: /home/devon7y/scratch/devon7y/hpc_eeg_analysis
 - Pipeline documentation source of truth: PIPELINE.md
+
+Trigger code table (authoritative):
+  Code 11 = Study phase, pair onset (always recorded; no correct/incorrect)
+  Code 21 = ASSOC test, correct response (hit or correct rejection)
+  Code 22 = ASSOC test, incorrect response (miss or false alarm)
+  Code 31 = ITEM test, correct response (hit or correct rejection)
+  Code 32 = ITEM test, incorrect response (miss or false alarm)
 - Session log migration requirements: SESSION_LOG_MIGRATION.md
 - Existing scripts:
   - hpc_raw_to_set.m / .slurm
@@ -78,8 +85,8 @@ The Skill should make the agent ask targeted questions, including:
   - VOLTAGE_DIFF (default 20)
   - VOLTAGE_ABS (default 1000)
   - EPOCH_WINDOW (required; no default)
-  - EPOCH_TRIGGERS_CSV (default 11;21;22; semicolon preferred for sbatch --export)
-  - EPOCH_GROUP_SPEC (default SME:11;Test_Intact:21;Test_Recombined:22)
+  - EPOCH_TRIGGERS_CSV (default 11;21;22;31;32; semicolon preferred for sbatch --export)
+  - EPOCH_GROUP_SPEC (default SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32)
   - CONDITION_ORDER (default empty/infer)
 
 B) Determine start stage automatically from folder contents
@@ -115,6 +122,12 @@ Branch rule:
 - Stage 4A is a branch from epoch outputs (Stage 3).
 - Stage 4B is the LIMO branch from epoch outputs (Stage 3).
 - Stages 5-6 require Stage 4B.
+- Folder contract is sibling-based:
+  - after Stage 1 -> <parent>/behavioral_set
+  - after Stage 2 -> <parent>/interpol
+  - after Stage 3 -> <parent>/epoch
+  - after Stage 4A -> <parent>/erp_plots
+  - after Stage 4B -> <parent>/limo_first_level
 
 E) Support label-based second-level contrasts
 - Prefer label mode in hpc_limo_second_level (C1_LABEL/C2_LABEL), not raw numeric indices.
@@ -167,20 +180,25 @@ Ensure the Skill includes canonical usage of these SLURM scripts and env vars:
   - optional SUBJECTS_FILE + SLURM_ARRAY_TASK_ID (array execution)
 - hpc_epoch_to_erp_plot.slurm
   - INPUT_FOLDER, TRIAL_TYPES_CSV, CHANNELS_CSV
+  - optional SUBJECT_ID (single-subject ERP plotting)
   - optional OUTPUT_DIR, FIGURE_TITLE, TIME_WINDOW_MS, SHOW_ERROR_BARS, PLOT_DIMENSIONS, X_AXIS_RANGE_MS
 - hpc_limo_first_level.slurm
   - INPUT_FOLDER, CONDITION_ORDER
+  - SUBJECT_ID must be rejected; this is an aggregate stage
 - hpc_limo_second_level.slurm
   - label mode: C1_LABEL, C2_LABEL, CONTRAST_KEY
   - numeric fallback: P1, P2, CONTRAST_KEY
+  - SUBJECT_ID must be rejected; this is an aggregate stage
   - validate/resolve INPUT_FOLDER to real first-level folder (contains `*.study` and `derivatives/`)
 - hpc_limo_channel_time_plots.slurm
   - INPUT_FOLDER, OUTPUT_DIR
+  - SUBJECT_ID must be rejected; this is an aggregate stage
   - optional TITLE_BASE, CHANNEL_TIME_TITLE, TOPOPLOT_TITLE, LR_TITLE
   - optional TOPOPLOT_LAYOUT (grid|zigzag|line)
   - validate/resolve INPUT_FOLDER to real second-level folder (contains `LIMO.mat` and `paired_samples_ttest_parameter_*.mat`)
 
 Also include use of submit_pipeline.sh where appropriate, but emphasize that the Skill must support partial pipelines and not force full runs.
+Note that submit_pipeline.sh is full-pipeline only and must reject SUBJECT_ID; single-subject reruns should use the stage wrappers directly.
 For full runs from raw input, prefer Stage 1-3 as SLURM arrays (subject-level parallelism).
 When relevant, note that submit_pipeline.sh can optionally submit the Stage 4A ERP branch after Stage 3 (CHANNELS required, ERP_TIME_WINDOW_MS optional and can include multiple windows, ERP_SHOW_ERROR_BARS optional and defaults to true, ERP_PLOT_DIMENSIONS optional with default "100 100 1200 700", ERP_X_AXIS_RANGE_MS optional).
 When submitting jobs, prefer `--output` / `--error` paths under each stage output folder's `logs/` subdirectory instead of a single global logs folder.

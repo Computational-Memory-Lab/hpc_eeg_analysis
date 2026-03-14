@@ -1,4 +1,4 @@
-function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms)
+function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms, subject_filter)
 % HPC_LIMO_CHANNEL_TIME_PLOTS - Generate channel-time and topoplot figures
 %
 % Usage:
@@ -8,6 +8,7 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type)
 %   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms)
+%   hpc_limo_channel_time_plots(input_folder, output_dir, title_base, channel_time_title, topoplot_title, lr_title, topoplot_layout_type, topoplot_step_ms, subject_filter)
 %
 % Inputs:
 %   input_folder - Path to a limo_second_level_<output_tag> folder containing
@@ -23,6 +24,10 @@ function hpc_limo_channel_time_plots(input_folder, output_dir, title_base, chann
 %                        'zigzag' : staggered left-to-right zigzag line
 %                        'line'   : single horizontal row
 %   topoplot_step_ms   - Optional topoplot interval in ms (default: 100)
+%   subject_filter     - Optional numeric subject ID.
+%                        This aggregate stage does not support subject-scoped runs.
+%                        Provide [] or omit it, and rerun plots on the full
+%                        second-level results folder.
 %
 % Outputs:
 %   - <output_dir>/<test_name>_channel_time_plot.png      Signed -log10(p) channel-time plot
@@ -52,6 +57,16 @@ end
 if nargin < 8 || isempty(topoplot_step_ms)
     topoplot_step_ms = 100;
 end
+if nargin < 9
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
+
+if ~isempty(subject_filter)
+    error(['subject_filter is not supported for hpc_limo_channel_time_plots. ' ...
+           'Re-run plots on the full second-level folder after upstream subject updates.']);
+end
 
 title_base = strtrim(char(title_base));
 channel_time_title = strtrim(char(channel_time_title));
@@ -59,6 +74,7 @@ topoplot_title = strtrim(char(topoplot_title));
 lr_title = strtrim(char(lr_title));
 topoplot_layout_type = normalize_topoplot_layout_type(topoplot_layout_type);
 topoplot_step_ms = normalize_topoplot_step_ms(topoplot_step_ms);
+axis_font_scale = 2.0;
 
 % ==================== PARSE INPUT FOLDER ====================
 [~, folder_name] = fileparts(input_folder);
@@ -238,13 +254,13 @@ highlight_rects = { ...
 };
 % Example legacy alternatives:
 % [400, 21; 700, 21], [400, 36; 700, 36], [400, 101; 700, 101], [-100, 224; 1500, 224]
-highlight_labels = {'E21', 'E36', 'E101', 'E153'};
+highlight_labels = {'E21', 'E87', 'E101', 'E153'};
 
-% Draw highlighted rectangles and left-margin labels.
+% Draw highlighted rectangles and in-window labels.
 if ~isempty(highlight_rects)
-    axis_font_size = get(imgax_exp, 'FontSize');
+    axis_font_size = 7 * axis_font_scale;
     time_range = times(end) - times(1);
-    label_offset = 0.004 * time_range;
+    label_padding = 0.01 * time_range;
 
     if numel(times_hr) > 1
         time_step = times_hr(2) - times_hr(1);
@@ -278,13 +294,14 @@ if ~isempty(highlight_rects)
 
         if i <= numel(highlight_labels) && ~isempty(highlight_labels{i})
             label_y = y + height / 2 - 0.25;
-            label_x = times(1) - label_offset;
+            label_x = x + label_padding;
             text(label_x, label_y, highlight_labels{i}, ...
-                'HorizontalAlignment', 'right', ...
+                'HorizontalAlignment', 'left', ...
                 'VerticalAlignment', 'middle', ...
                 'Color', 'k', ...
                 'FontSize', axis_font_size, ...
-                'Clipping', 'off');
+                'FontWeight', 'bold', ...
+                'Clipping', 'on');
         end
     end
 end
@@ -296,7 +313,7 @@ plot(imgax_exp, [0 0], ylim_vals, 'Color', [0.3 0.3 0.3], 'LineStyle', '--', 'Li
 colormap(imgax_exp, cc);
 
 h = colorbar(imgax_exp, 'Position', [0.88 0.12 0.04 0.68]);
-title(h, 'signed -log10(p)', 'FontSize', 10, 'Color', 'k');
+title(h, 'signed -log10(p)', 'FontSize', 10 * axis_font_scale, 'Color', 'k');
 set(h, 'Color', 'k', 'Box', 'on', 'LineWidth', 1, 'TickLength', 0);
 
 % Add significance threshold lines to colorbar
@@ -369,9 +386,9 @@ regular_ticks = min_tick:tick_interval:max_tick;
 all_ticks = unique([regular_ticks, times(end)]);
 set(imgax_exp, 'XTick', all_ticks);
 
-set(imgax_exp, 'FontSize', 7);
-xlabel(imgax_exp, 'Time (ms)', 'Color', 'k', 'FontSize', 8);
-ylabel(imgax_exp, 'Channel', 'Color', 'k', 'FontSize', 8);
+set(imgax_exp, 'FontSize', 7 * axis_font_scale);
+xlabel(imgax_exp, 'Time (ms)', 'Color', 'k', 'FontSize', 8 * axis_font_scale);
+ylabel(imgax_exp, 'Channel', 'Color', 'k', 'FontSize', 8 * axis_font_scale);
 
 h_xlabel = get(imgax_exp, 'XLabel');
 h_ylabel = get(imgax_exp, 'YLabel');
@@ -380,8 +397,8 @@ ylabel_pos = get(h_ylabel, 'Position');
 set(h_xlabel, 'Position', [xlabel_pos(1), xlabel_pos(2) + 3, xlabel_pos(3)]);
 set(h_ylabel, 'Position', [ylabel_pos(1) - 25, ylabel_pos(2), ylabel_pos(3)]);
 
-title(h, 'signed -log10(p)', 'FontSize', 8, 'Color', 'k');
-set(h, 'FontSize', 7);
+title(h, 'signed -log10(p)', 'FontSize', 8 * axis_font_scale, 'Color', 'k');
+set(h, 'FontSize', 7 * axis_font_scale);
 
 plot_title = channel_time_title;
 if isempty(plot_title)
@@ -459,7 +476,7 @@ if has_likelihood_data
     colormap(imgax_bf, cc_lr);
 
     h_bf = colorbar(imgax_bf, 'Position', [0.88 0.12 0.04 0.68]);
-    title(h_bf, 'log10(LR)', 'FontSize', 10, 'Color', 'k');
+    title(h_bf, 'log10(LR)', 'FontSize', 10 * axis_font_scale, 'Color', 'k');
     set(h_bf, 'Color', 'k', 'Box', 'on', 'LineWidth', 1, 'TickLength', 0);
 
     log10_LR_threshold_strong_H1 = log10(LR_strong_threshold);
@@ -532,9 +549,9 @@ if has_likelihood_data
     all_ticks_bf = unique([min_tick_bf:tick_interval_bf:max_tick_bf, times(end)]);
     set(imgax_bf, 'XTick', all_ticks_bf);
 
-    set(imgax_bf, 'FontSize', 7);
-    xlabel(imgax_bf, 'Time (ms)', 'Color', 'k', 'FontSize', 8);
-    ylabel(imgax_bf, 'Channel', 'Color', 'k', 'FontSize', 8);
+    set(imgax_bf, 'FontSize', 7 * axis_font_scale);
+    xlabel(imgax_bf, 'Time (ms)', 'Color', 'k', 'FontSize', 8 * axis_font_scale);
+    ylabel(imgax_bf, 'Channel', 'Color', 'k', 'FontSize', 8 * axis_font_scale);
 
     h_xlabel_bf = get(imgax_bf, 'XLabel');
     h_ylabel_bf = get(imgax_bf, 'YLabel');
@@ -543,8 +560,8 @@ if has_likelihood_data
     set(h_xlabel_bf, 'Position', [xlabel_pos_bf(1), xlabel_pos_bf(2) + 3, xlabel_pos_bf(3)]);
     set(h_ylabel_bf, 'Position', [ylabel_pos_bf(1) - 25, ylabel_pos_bf(2), ylabel_pos_bf(3)]);
 
-    title(h_bf, 'log10(LR)', 'FontSize', 8, 'Color', 'k');
-    set(h_bf, 'FontSize', 7);
+    title(h_bf, 'log10(LR)', 'FontSize', 8 * axis_font_scale, 'Color', 'k');
+    set(h_bf, 'FontSize', 7 * axis_font_scale);
 
     plot_title_lr = lr_title;
     if isempty(plot_title_lr)
@@ -641,7 +658,7 @@ for i = 1:num_latencies
         'Units', 'normalized', ...
         'HorizontalAlignment', 'center', ...
         'VerticalAlignment', 'top', ...
-        'FontSize', 8, ...
+        'FontSize', 8 * axis_font_scale, ...
         'FontWeight', 'bold', ...
         'Color', 'k', ...
         'Clipping', 'off');
@@ -662,7 +679,8 @@ h_topo = colorbar(ax_ref_topo, 'Position', topo_cbar_position);
 tick_values_topo = [colorbar_limits_topo(1), colorbar_limits_topo(1)/2, 0, colorbar_limits_topo(2)/2, colorbar_limits_topo(2)];
 tick_labels_topo = arrayfun(@(x) sprintf('%.1f', x), tick_values_topo, 'UniformOutput', false);
 set(h_topo, 'Ticks', tick_values_topo, 'TickLabels', tick_labels_topo, 'Color', 'k', 'Box', 'on');
-title(h_topo, 'signed -log10(p)', 'FontSize', 10, 'Color', 'k');
+title(h_topo, 'signed -log10(p)', 'FontSize', 10 * axis_font_scale, 'Color', 'k');
+set(h_topo, 'FontSize', 7 * axis_font_scale);
 set(ax_ref_topo, 'XTick', [], 'YTick', [], 'Box', 'off');
 
 plot_title_topo = topoplot_title;
@@ -1040,4 +1058,30 @@ out(1:nr, 1:nc) = in;
 out(nr + 1, 1:nc) = in(nr, :);
 out(1:nr, nc + 1) = in(:, nc);
 out(nr + 1, nc + 1) = in(nr, nc);
+end
+
+function out = parse_optional_subject_filter(value)
+if isempty(value)
+    out = [];
+    return;
+end
+
+if isstring(value)
+    value = char(value);
+end
+
+if ischar(value)
+    value = strtrim(value);
+    if isempty(value)
+        out = [];
+        return;
+    end
+    value = str2double(value);
+end
+
+if ~(isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0)
+    error('subject_filter must be a finite integer subject ID.');
+end
+
+out = double(value);
 end

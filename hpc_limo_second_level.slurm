@@ -22,6 +22,10 @@
 # Output will be written to:
 #   <parent_of_INPUT_FOLDER>/limo_second_level_<CONTRAST_KEY>/
 #
+# SUBJECT_ID is intentionally unsupported for this aggregate stage.
+# Re-run second-level analysis on the full first-level folder after any
+# subject-scoped upstream updates.
+#
 # INPUT_FOLDER auto-resolution:
 #   If INPUT_FOLDER is not a first-level folder directly, this wrapper will
 #   try common layouts such as:
@@ -34,6 +38,12 @@ P2="${P2:-4}"
 C1_LABEL="${C1_LABEL:-}"
 C2_LABEL="${C2_LABEL:-}"
 CONTRAST_KEY="${CONTRAST_KEY:-}"
+SUBJECT_ID="${SUBJECT_ID:-}"
+
+if [[ -n "${SUBJECT_ID}" ]]; then
+  echo "ERROR: SUBJECT_ID is not supported for hpc_limo_second_level.slurm. Re-run second-level analysis on the full first-level folder." >&2
+  exit 1
+fi
 
 has_first_level_artifacts() {
   local dir="$1"
@@ -84,15 +94,13 @@ fi
 module load matlab/2023b
 
 if [[ -n "${C1_LABEL}" && -n "${C2_LABEL}" ]]; then
-  matlab -nodisplay -nosplash -r "\
+  matlab -batch "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_limo_second_level('${INPUT_FOLDER}', {'${C1_LABEL}','${C2_LABEL}'}, '${CONTRAST_KEY}'); \
-exit;"
+hpc_limo_second_level('${INPUT_FOLDER}', {'${C1_LABEL}','${C2_LABEL}'}, '${CONTRAST_KEY}');"
 else
-  matlab -nodisplay -nosplash -r "\
+  matlab -batch "\
 addpath('/home/devon7y/scratch/devon7y/eeglab2022.1'); \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-hpc_limo_second_level('${INPUT_FOLDER}', [${P1} ${P2}], '${CONTRAST_KEY}'); \
-exit;"
+hpc_limo_second_level('${INPUT_FOLDER}', [${P1} ${P2}], '${CONTRAST_KEY}');"
 fi

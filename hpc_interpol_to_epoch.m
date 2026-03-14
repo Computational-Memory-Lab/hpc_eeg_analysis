@@ -15,13 +15,13 @@ function hpc_interpol_to_epoch(input_folder, epoch_window, voltage_diff_threshol
 %                            like '-0.1,1.5' / '-0.1 1.5'.
 %   voltage_diff_threshold - Max voltage difference threshold in uV (default: 20)
 %   voltage_abs_threshold  - Max absolute voltage threshold in uV (default: 1000)
-%   epoch_triggers         - Trigger codes for epoching (default: {'11','21','22'})
+%   epoch_triggers         - Trigger codes for epoching (default: {'11','21','22','31','32'})
 %                            Accepts cell array, numeric array, or comma/semicolon string.
 %   group_spec             - Artifact rejection groups by trigger code.
-%                            Default: 'SME:11;Test_Intact:21;Test_Recombined:22'
+%                            Default: 'SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32'
 %                            Accepts:
-%                              1) Nx2 cell, e.g. {'SME', {'11'}; 'Test', {'21','22'}}
-%                              2) spec string, e.g. 'SME:11;Test:21,22'
+%                              1) Nx2 cell, e.g. {'SME', {'11'}; 'Test_Assoc', {'21','22'}}
+%                              2) spec string, e.g. 'SME:11;Test_Assoc:21,22'
 %   subject_filter         - Optional numeric subject ID. When provided,
 %                            process only that subject.
 %
@@ -42,10 +42,10 @@ if nargin < 4 || isempty(voltage_abs_threshold)
     voltage_abs_threshold = 1000;
 end
 if nargin < 5 || isempty(epoch_triggers)
-    epoch_triggers = {'11', '21', '22'};
+    epoch_triggers = {'11', '21', '22', '31', '32'};
 end
 if nargin < 6 || isempty(group_spec)
-    group_spec = 'SME:11;Test_Intact:21;Test_Recombined:22';
+    group_spec = 'SME:11;Test_Assoc_Correct:21;Test_Assoc_Error:22;Test_Item_Correct:31;Test_Item_Error:32';
 end
 if nargin < 7
     subject_filter = [];
@@ -56,6 +56,7 @@ input_folder = normalize_input_folder(input_folder);
 
 epoch_triggers = normalize_trigger_list(epoch_triggers);
 group_def = parse_group_spec(group_spec);
+[group_names, group_field_names] = normalize_group_names(group_def);
 condition_names = {'Study_hits', 'Study_misses', 'Test_hits', 'Test_misses', 'Correct_rejections', 'False_alarms'};
 
 % Create output folder and summary file path.
@@ -140,8 +141,8 @@ max_rejected_trials_per_group = 56;
 
 % Legacy-compatible summary containers (replaces old Processing_Summary_*.mat content).
 stats = initialize_epoch_stats(length(file_info), voltage_diff_threshold, ...
-    voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window);
-results = initialize_epoch_results(length(file_info), condition_names);
+    voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window, group_names, group_field_names);
+results = initialize_epoch_results(length(file_info), condition_names, group_field_names);
 
 for file_idx = 1:length(file_info)
     current_file = file_info(file_idx);
@@ -196,10 +197,9 @@ for file_idx = 1:length(file_info)
     exclude_subject = false;
     exclusion_reason = '';
     all_channels = 1:EEG.nbchan;
-    subject_stats = struct('condition1_total', 0, 'condition2_total', 0, ...
-        'SME_original', 0, 'SME_removed', 0, 'SME_final', 0, ...
-        'Test_Intact_original', 0, 'Test_Intact_removed', 0, 'Test_Intact_final', 0, ...
-        'Test_Recombined_original', 0, 'Test_Recombined_removed', 0, 'Test_Recombined_final', 0);
+    subject_stats = struct('condition1_total', 0, 'condition2_total', 0);
+    subject_group_original = zeros(1, numel(group_field_names));
+    subject_group_removed = zeros(1, numel(group_field_names));
 
     for g = 1:size(group_def, 1)
         group_name = group_def{g, 1};
@@ -211,13 +211,7 @@ for file_idx = 1:length(file_info)
         end
 
         group_original_trials = numel(group_trial_indices);
-        if strcmp(group_name, 'SME')
-            subject_stats.SME_original = group_original_trials;
-        elseif strcmp(group_name, 'Test_Intact')
-            subject_stats.Test_Intact_original = group_original_trials;
-        elseif strcmp(group_name, 'Test_Recombined')
-            subject_stats.Test_Recombined_original = group_original_trials;
-        end
+        subject_group_original(g) = group_original_trials;
 
         EEG_group = pop_select(EEG, 'trial', group_trial_indices);
         [~, bad_trials_relative, cond1_bad, cond2_bad] = get_bad_trials_v2(EEG_group, ...
@@ -234,13 +228,7 @@ for file_idx = 1:length(file_info)
                 group_name, numel(bad_trials_relative), max_rejected_trials_per_group);
         end
 
-        if strcmp(group_name, 'SME')
-            subject_stats.SME_removed = numel(bad_trials_relative);
-        elseif strcmp(group_name, 'Test_Intact')
-            subject_stats.Test_Intact_removed = numel(bad_trials_relative);
-        elseif strcmp(group_name, 'Test_Recombined')
-            subject_stats.Test_Recombined_removed = numel(bad_trials_relative);
-        end
+        subject_group_removed(g) = numel(bad_trials_relative);
 
         bad_trials_absolute = group_trial_indices(bad_trials_relative);
         all_bad_trials_absolute = [all_bad_trials_absolute(:); bad_trials_absolute(:)]; %#ok<AGROW>
@@ -280,23 +268,18 @@ for file_idx = 1:length(file_info)
             subject_condition_original.(cond_name) - subject_condition_final.(cond_name);
     end
 
-    subject_stats.SME_final = max(subject_stats.SME_original - subject_stats.SME_removed, 0);
-    subject_stats.Test_Intact_final = max(subject_stats.Test_Intact_original - subject_stats.Test_Intact_removed, 0);
-    subject_stats.Test_Recombined_final = max(subject_stats.Test_Recombined_original - subject_stats.Test_Recombined_removed, 0);
+    subject_group_final = max(subject_group_original - subject_group_removed, 0);
 
     results.final_trials(file_idx) = EEG.trials;
     results.removed_trials(file_idx) = numel(final_bad_trials);
     results.condition1_removals(file_idx) = subject_stats.condition1_total;
     results.condition2_removals(file_idx) = subject_stats.condition2_total;
-    results.SME_original(file_idx) = subject_stats.SME_original;
-    results.SME_removals(file_idx) = subject_stats.SME_removed;
-    results.SME_final(file_idx) = subject_stats.SME_final;
-    results.Test_Intact_original(file_idx) = subject_stats.Test_Intact_original;
-    results.Test_Intact_removals(file_idx) = subject_stats.Test_Intact_removed;
-    results.Test_Intact_final(file_idx) = subject_stats.Test_Intact_final;
-    results.Test_Recombined_original(file_idx) = subject_stats.Test_Recombined_original;
-    results.Test_Recombined_removals(file_idx) = subject_stats.Test_Recombined_removed;
-    results.Test_Recombined_final(file_idx) = subject_stats.Test_Recombined_final;
+    for g = 1:numel(group_field_names)
+        group_field = group_field_names{g};
+        results.group_original.(group_field)(file_idx) = subject_group_original(g);
+        results.group_removed.(group_field)(file_idx) = subject_group_removed(g);
+        results.group_final.(group_field)(file_idx) = subject_group_final(g);
+    end
 
     EEG = eeg_checkset(EEG, 'eventconsistency');
     EEG.setname = sprintf('Subject %d - All Conditions Clean', s);
@@ -335,7 +318,7 @@ fprintf('==============================================\n\n');
 
 end
 
-function stats = initialize_epoch_stats(total_subjects, voltage_diff_threshold, voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window)
+function stats = initialize_epoch_stats(total_subjects, voltage_diff_threshold, voltage_abs_threshold, max_rejected_trials_per_group, condition_names, epoch_window, group_names, group_field_names)
 stats = struct();
 stats.total_subjects = total_subjects;
 stats.processed_subjects = 0;
@@ -348,15 +331,11 @@ stats.epoch_window = epoch_window;
 stats.total_original_trials = 0;
 stats.total_final_trials = 0;
 stats.total_removed_trials = 0;
-stats.SME_removals = [];
-stats.SME_original_trials = [];
-stats.SME_final_trials = [];
-stats.Test_Intact_removals = [];
-stats.Test_Intact_original_trials = [];
-stats.Test_Intact_final_trials = [];
-stats.Test_Recombined_removals = [];
-stats.Test_Recombined_original_trials = [];
-stats.Test_Recombined_final_trials = [];
+stats.group_names = reshape(group_names, 1, []);
+stats.group_field_names = reshape(group_field_names, 1, []);
+stats.group_removed_trials = struct();
+stats.group_original_trials = struct();
+stats.group_final_trials = struct();
 stats.condition1_removals = [];
 stats.condition2_removals = [];
 stats.total_removals_per_subject = [];
@@ -367,6 +346,12 @@ stats.subject_removed_trials = [];
 stats.condition_original_trials = struct();
 stats.condition_final_trials = struct();
 stats.condition_removed_trials = struct();
+for g = 1:numel(group_field_names)
+    group_field = group_field_names{g};
+    stats.group_original_trials.(group_field) = [];
+    stats.group_removed_trials.(group_field) = [];
+    stats.group_final_trials.(group_field) = [];
+end
 for c = 1:numel(condition_names)
     cond_name = condition_names{c};
     stats.condition_original_trials.(cond_name) = [];
@@ -376,7 +361,7 @@ end
 stats.exclusion_reasons = {};
 end
 
-function results = initialize_epoch_results(total_subjects, condition_names)
+function results = initialize_epoch_results(total_subjects, condition_names, group_field_names)
 results = struct();
 results.processed = false(total_subjects, 1);
 results.skipped = false(total_subjects, 1);
@@ -388,15 +373,15 @@ results.final_trials = zeros(total_subjects, 1);
 results.removed_trials = zeros(total_subjects, 1);
 results.condition1_removals = zeros(total_subjects, 1);
 results.condition2_removals = zeros(total_subjects, 1);
-results.SME_removals = zeros(total_subjects, 1);
-results.SME_original = zeros(total_subjects, 1);
-results.SME_final = zeros(total_subjects, 1);
-results.Test_Intact_removals = zeros(total_subjects, 1);
-results.Test_Intact_original = zeros(total_subjects, 1);
-results.Test_Intact_final = zeros(total_subjects, 1);
-results.Test_Recombined_removals = zeros(total_subjects, 1);
-results.Test_Recombined_original = zeros(total_subjects, 1);
-results.Test_Recombined_final = zeros(total_subjects, 1);
+results.group_original = struct();
+results.group_removed = struct();
+results.group_final = struct();
+for g = 1:numel(group_field_names)
+    group_field = group_field_names{g};
+    results.group_original.(group_field) = zeros(total_subjects, 1);
+    results.group_removed.(group_field) = zeros(total_subjects, 1);
+    results.group_final.(group_field) = zeros(total_subjects, 1);
+end
 for c = 1:numel(condition_names)
     cond_name = condition_names{c};
     results.(['cond_orig_' cond_name]) = zeros(total_subjects, 1);
@@ -440,15 +425,12 @@ stats.condition1_removals = results.condition1_removals(processed_not_excluded);
 stats.condition2_removals = results.condition2_removals(processed_not_excluded);
 stats.total_removals_per_subject = results.removed_trials(processed_not_excluded);
 
-stats.SME_removals = results.SME_removals(processed_not_excluded);
-stats.SME_original_trials = results.SME_original(processed_not_excluded);
-stats.SME_final_trials = results.SME_final(processed_not_excluded);
-stats.Test_Intact_removals = results.Test_Intact_removals(processed_not_excluded);
-stats.Test_Intact_original_trials = results.Test_Intact_original(processed_not_excluded);
-stats.Test_Intact_final_trials = results.Test_Intact_final(processed_not_excluded);
-stats.Test_Recombined_removals = results.Test_Recombined_removals(processed_not_excluded);
-stats.Test_Recombined_original_trials = results.Test_Recombined_original(processed_not_excluded);
-stats.Test_Recombined_final_trials = results.Test_Recombined_final(processed_not_excluded);
+for g = 1:numel(stats.group_field_names)
+    group_field = stats.group_field_names{g};
+    stats.group_original_trials.(group_field) = results.group_original.(group_field)(processed_not_excluded);
+    stats.group_removed_trials.(group_field) = results.group_removed.(group_field)(processed_not_excluded);
+    stats.group_final_trials.(group_field) = results.group_final.(group_field)(processed_not_excluded);
+end
 
 for c = 1:numel(condition_names)
     cond_name = condition_names{c};
@@ -486,6 +468,7 @@ processing_summary.parameters.voltage_abs_threshold = stats.voltage_abs_threshol
 processing_summary.parameters.max_rejected_trials_per_group = stats.max_rejected_trials_per_group;
 processing_summary.parameters.epoch_window = stats.epoch_window;
 processing_summary.parameters.baseline_window = [-100, 0];
+processing_summary.parameters.artifact_group_names = stats.group_names;
 
 processing_summary.overall = struct();
 processing_summary.overall.total_original_trials = stats.total_original_trials;
@@ -505,9 +488,13 @@ processing_summary.condition_based.overlap_trials = ...
     sum(stats.condition1_removals) + sum(stats.condition2_removals) - stats.total_removed_trials;
 
 processing_summary.group_based = struct();
-processing_summary.group_based.SME = build_group_summary(stats.SME_original_trials, stats.SME_removals, stats.SME_final_trials);
-processing_summary.group_based.Test_Intact = build_group_summary(stats.Test_Intact_original_trials, stats.Test_Intact_removals, stats.Test_Intact_final_trials);
-processing_summary.group_based.Test_Recombined = build_group_summary(stats.Test_Recombined_original_trials, stats.Test_Recombined_removals, stats.Test_Recombined_final_trials);
+for g = 1:numel(stats.group_field_names)
+    group_field = stats.group_field_names{g};
+    processing_summary.group_based.(group_field) = build_group_summary( ...
+        stats.group_original_trials.(group_field), ...
+        stats.group_removed_trials.(group_field), ...
+        stats.group_final_trials.(group_field));
+end
 
 processing_summary.experimental_conditions = struct();
 for c = 1:numel(condition_names)
@@ -777,6 +764,12 @@ end
 if isempty(group_def)
     error('No artifact groups were defined.');
 end
+end
+
+function [group_names, group_field_names] = normalize_group_names(group_def)
+group_names = group_def(:, 1);
+group_field_names = matlab.lang.makeValidName(group_names, 'ReplacementStyle', 'delete');
+group_field_names = matlab.lang.makeUniqueStrings(group_field_names, {}, namelengthmax);
 end
 
 function [EEG, condition_counts] = assign_trial_type_from_event_label(EEG, epoch_triggers)

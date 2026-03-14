@@ -1,4 +1,4 @@
-function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
+function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 % HPC_EPOCH_TO_ERP_PLOT - Plot grand-average ERP curves by trial_type.
 %
 % Usage:
@@ -9,6 +9,7 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars)
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions)
 %   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms)
+%   hpc_epoch_to_erp_plot(input_folder, trial_type_values, channels, output_dir, figure_title, time_window_ms, show_error_bars, plot_dimensions, x_axis_range_ms, subject_filter)
 %
 % Inputs:
 %   input_folder      - Path to epoch folder containing *_epoch.set files.
@@ -32,6 +33,8 @@ function results = hpc_epoch_to_erp_plot(input_folder, trial_type_values, channe
 %                       Accepted formats:
 %                       - [start end], 'start-end', 'start,end', 'start end'
 %                       - scalar duration in ms (e.g., 800 => [data_start, data_start+800])
+%   subject_filter    - Optional numeric subject ID. When provided, limit plotting
+%                       to the matching <ID>_epoch.set file inside input_folder.
 %
 % Outputs:
 %   - If one channel: same as before
@@ -70,6 +73,11 @@ end
 if nargin < 9
     x_axis_range_ms = [];
 end
+if nargin < 10
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
 
 trial_type_values = parse_trial_type_values(trial_type_values);
 trial_type_display_values = cellfun(@format_display_label, trial_type_values, 'UniformOutput', false);
@@ -89,6 +97,9 @@ fprintf('Output folder:  %s\n', output_dir);
 fprintf('Error bars:     %s\n', logical_to_onoff(show_error_bars));
 fprintf('Plot dims:      [%.0f %.0f %.0f %.0f]\n', plot_dimensions);
 fprintf('X-axis range:   %s\n', describe_x_axis_range_request(x_axis_range_ms));
+if ~isempty(subject_filter)
+    fprintf('Subject filter: %d\n', subject_filter);
+end
 if ~isempty(time_windows_ms)
     fprintf('Time windows:\n');
     for w = 1:size(time_windows_ms, 1)
@@ -117,6 +128,7 @@ epoch_files = dir(fullfile(input_folder, '*_epoch.set'));
 if isempty(epoch_files)
     error('No *_epoch.set files found in: %s', input_folder);
 end
+epoch_files = filter_epoch_files_by_subject_id(epoch_files, subject_filter, input_folder);
 
 n_subjects = numel(epoch_files);
 n_conditions = numel(trial_type_values);
@@ -392,7 +404,7 @@ for ch = 1:n_channels_to_plot
     save(output_mat, 'trial_type_values', 'channel_in_use', 'channels_in_use', 'time_vector', ...
         'grand_average_by_condition', 'trial_counts', 'participants_per_condition', ...
         'subject_ids', 'time_windows_ms', 'resolved_time_windows', 'window_indices', ...
-        'subject_window_means', 'stats_by_window', 'plot_dimensions', ...
+        'subject_window_means', 'stats_by_window', 'plot_dimensions', 'subject_filter', ...
         'x_axis_range_ms', 'resolved_x_axis_range_ms');
 
     write_stats_report(output_stats_txt, input_folder, trial_type_values, channel_in_use, ...
@@ -442,6 +454,7 @@ if nargout > 0
     results.time_windows_ms = time_windows_ms;
     results.resolved_time_windows = resolved_time_windows;
     results.window_sample_indices = window_indices;
+    results.subject_filter = subject_filter;
     results.plot_dimensions = plot_dimensions;
     results.x_axis_range_ms = x_axis_range_ms;
     results.resolved_x_axis_range_ms = resolved_x_axis_range_ms;
@@ -1263,9 +1276,9 @@ end
 function out = channel_display_name(channel_idx)
 switch double(channel_idx)
     case 21
-        out = 'Fz';
+        out = 'E21/Fz';
     case 87
-        out = 'P3';
+        out = 'E87/P3';
     otherwise
         out = sprintf('E%d', channel_idx);
 end
@@ -1790,6 +1803,55 @@ if ~isempty(tokens)
 else
     subject_label = basename;
 end
+end
+
+function filtered_files = filter_epoch_files_by_subject_id(epoch_files, subject_filter, input_folder)
+if isempty(subject_filter)
+    filtered_files = epoch_files;
+    return;
+end
+
+filtered_files = epoch_files([]);
+for i = 1:numel(epoch_files)
+    [~, basename, ~] = fileparts(epoch_files(i).name);
+    tokens = regexp(basename, '^(\d+)_epoch$', 'tokens', 'once');
+    if isempty(tokens)
+        continue;
+    end
+    if str2double(tokens{1}) == subject_filter
+        filtered_files(end + 1) = epoch_files(i); %#ok<AGROW>
+    end
+end
+
+if isempty(filtered_files)
+    error('Subject %d not found in epoch folder: %s', subject_filter, input_folder);
+end
+end
+
+function out = parse_optional_subject_filter(value)
+if isempty(value)
+    out = [];
+    return;
+end
+
+if isstring(value)
+    value = char(value);
+end
+
+if ischar(value)
+    value = strtrim(value);
+    if isempty(value)
+        out = [];
+        return;
+    end
+    value = str2double(value);
+end
+
+if ~(isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0)
+    error('subject_filter must be a finite integer subject ID.');
+end
+
+out = double(value);
 end
 
 function out = build_trial_type_tag(labels)

@@ -1,16 +1,21 @@
-function hpc_limo_second_level(input_folder, contrast, output_tag)
+function hpc_limo_second_level(input_folder, contrast, output_tag, subject_filter)
 % HPC_LIMO_SECOND_LEVEL - Run LIMO group-level paired t-test
 %
 % Usage:
 %   hpc_limo_second_level(input_folder, [p1 p2])
 %   hpc_limo_second_level(input_folder, {'CondA', 'CondB'})
 %   hpc_limo_second_level(input_folder, contrast, output_tag)
+%   hpc_limo_second_level(input_folder, contrast, output_tag, subject_filter)
 %
 % Inputs:
 %   input_folder - Path to limo_first_level folder
 %   contrast     - Either numeric [p1 p2] parameter indices, or
 %                  condition-name pair {'CondA','CondB'}
 %   output_tag   - Optional folder suffix (e.g., 'study_hits_vs_study_misses')
+%   subject_filter - Optional numeric subject ID.
+%                    This aggregate stage does not support subject-scoped runs.
+%                    Provide [] or omit it, and rerun second-level analysis
+%                    on the full first-level folder.
 %
 % Outputs:
 %   - <parent_of_input_folder>/limo_second_level_<output_tag>/
@@ -21,7 +26,17 @@ end
 if nargin < 3
     output_tag = '';
 end
+if nargin < 4
+    subject_filter = [];
+else
+    subject_filter = parse_optional_subject_filter(subject_filter);
+end
 input_folder = normalize_input_folder(input_folder);
+
+if ~isempty(subject_filter)
+    error(['subject_filter is not supported for hpc_limo_second_level. ' ...
+           'Re-run second-level analysis on the full first-level folder after upstream subject updates.']);
+end
 
 is_numeric_contrast = isnumeric(contrast);
 if is_numeric_contrast
@@ -99,7 +114,7 @@ catch ME
     catch ME2
         disp('EEGLAB failed to start:');
         disp(getReport(ME2));
-        return;
+        rethrow(ME2);
     end
 end
 
@@ -122,7 +137,7 @@ try
 catch ME
     fprintf('ERROR: Failed to load STUDY:\n');
     disp(getReport(ME));
-    return;
+    rethrow(ME);
 end
 
 % Resolve condition labels to numeric indices if needed
@@ -234,6 +249,7 @@ try
 catch ME
     fprintf('ERROR: LIMO paired t-test failed:\n');
     disp(getReport(ME));
+    rethrow(ME);
 end
 
 % Save resolved contrast metadata
@@ -406,6 +422,32 @@ while ~feof(fid)
 end
 
 order = unique(order, 'stable');
+end
+
+function out = parse_optional_subject_filter(value)
+if isempty(value)
+    out = [];
+    return;
+end
+
+if isstring(value)
+    value = char(value);
+end
+
+if ischar(value)
+    value = strtrim(value);
+    if isempty(value)
+        out = [];
+        return;
+    end
+    value = str2double(value);
+end
+
+if ~(isnumeric(value) && isscalar(value) && isfinite(value) && mod(value, 1) == 0)
+    error('subject_filter must be a finite integer subject ID.');
+end
+
+out = double(value);
 end
 
 function [p1, p2] = labels_to_parameter_indices(labels, condition_order)
