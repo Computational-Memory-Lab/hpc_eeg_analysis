@@ -94,9 +94,17 @@ chanlocs_file = '/home/devon7y/scratch/devon7y/devon_preprocessing/New_Received2
 if ~exist(chanlocs_file, 'file')
     error('Channel locations file not found: %s', chanlocs_file);
 end
-all_chanlocs = readlocs(chanlocs_file, 'filetype', 'sfp');
-if isempty(all_chanlocs)
+raw_chanlocs = readlocs(chanlocs_file, 'filetype', 'sfp');
+if isempty(raw_chanlocs)
     error('No channel locations loaded from: %s', chanlocs_file);
+end
+[all_chanlocs, template_index_info] = select_data_chanlocs(raw_chanlocs);
+fprintf(['Loaded %d channel-location entries from template and selected %d EEG data channels ' ...
+         'for pipeline use.\n'], numel(raw_chanlocs), numel(all_chanlocs));
+if numel(raw_chanlocs) ~= numel(all_chanlocs)
+    fprintf('  Excluded non-data template entries at rows: %s\n\n', mat2str(template_index_info.excluded_rows));
+else
+    fprintf('\n');
 end
 
 %% CREATE OUTPUT DIRECTORY
@@ -176,8 +184,9 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Sampling rate: %d Hz\n', EEG.srate);
     fprintf('  Events: %d\n\n', length(EEG.event));
 
-    if length(all_chanlocs) < EEG.nbchan
-        error('Channel location file has %d channels but dataset has %d', length(all_chanlocs), EEG.nbchan);
+    if length(all_chanlocs) ~= EEG.nbchan
+        error(['Data-channel template has %d channels but dataset has %d. ' ...
+               'Check fiducial/non-data entries in %s.'], length(all_chanlocs), EEG.nbchan, chanlocs_file);
     end
 
     %% REMOVE FLATLINED CHANNELS
@@ -258,7 +267,7 @@ for file_idx = 1:length(files_to_process)
         fprintf('  No channels removed\n');
     end
     fprintf('  Remaining channels: %d\n', EEG.nbchan);
-    fprintf('  DEBUG: EEG.nbchan=%d, length(EEG.chanlocs)=%d\n\n', EEG.nbchan, length(EEG.chanlocs));
+    fprintf('\n');
 
     %% LOAD CHANNEL LOCATIONS (aligned to surviving original channel indices)
     fprintf('STEP 7: Loading channel locations...\n');
@@ -313,15 +322,15 @@ for file_idx = 1:length(files_to_process)
     end
     fprintf('  Remaining channels: %d\n\n', EEG.nbchan);
 
-    % Reload channel locations for the channels that survived RANSAC.
-    % clean_channels removes channels from EEG.data but does not update
-    % EEG.chanlocs, causing eeg_checkset to auto-clear chanlocs on the
-    % next pop_saveset call.  Reassign from the already-updated
-    % original_channel_indices to prevent ICLabel from failing later.
-    if numel(original_channel_indices) == EEG.nbchan
-        EEG.chanlocs = all_chanlocs(original_channel_indices);
-        fprintf('  Reloaded channel locations for %d post-RANSAC channels\n\n', EEG.nbchan);
-    end
+    % Rebuild all channel-location metadata after RANSAC. clean_channels
+    % removes channels from EEG.data but can leave chanloc-related metadata
+    % inconsistent, which later causes eeg_checkset/pop_saveset to clear
+    % locations and makes ICLabel fail inside pop_reref.
+    EEG = restore_chanloc_metadata(EEG, all_chanlocs, original_channel_indices, initial_channels);
+    EEG = eeg_checkset(EEG);
+    assert_chanloc_metadata(EEG, 'post-RANSAC checkpoint');
+    fprintf('  Rebuilt channel metadata for %d retained channels and %d removed channels\n\n', ...
+        EEG.nbchan, initial_channels - EEG.nbchan);
 
     % Save checkpoint before ICA
     before_amica_filename = sprintf('before_step9_amica_%d.set', subject_id);
@@ -344,10 +353,13 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Time elapsed: %.2f minutes\n', amica_time/60);
     fprintf('  Components computed: %d\n\n', size(EEG.icaweights, 1));
 
-    if isempty(EEG.icachansind) || length(EEG.icachansind) ~= EEG.nbchan
+    if isempty(EEG.icachansind)
         EEG.icachansind = 1:EEG.nbchan;
         fprintf('  Set icachansind to current channels (1:%d)\n\n', EEG.nbchan);
     end
+    EEG.icachansind = reshape(double(EEG.icachansind), 1, []);
+    EEG = eeg_checkset(EEG);
+    assert_iclabel_ready(EEG);
 
     %% IC CLASSIFICATION
     fprintf('STEP 10: Classifying independent components (ICLabel)...\n');
@@ -532,6 +544,141 @@ if isempty(remove_idx)
     return;
 end
 out(remove_idx) = [];
+end
+
+function [data_chanlocs, index_info] = select_data_chanlocs(raw_chanlocs)
+if ~isstruct(raw_chanlocs) || isempty(raw_chanlocs)
+    error('Channel-location template is empty or malformed.');
+end
+if ~isfield(raw_chanlocs, 'labels')
+    error('Channel-location template is missing labels, so data channels cannot be identified.');
+end
+
+labels = cell(1, numel(raw_chanlocs));
+e_numbers = nan(1, numel(raw_chanlocs));
+for idx = 1:numel(raw_chanlocs)
+    labels{idx} = strtrim(char(raw_chanlocs(idx).labels));
+    token = regexp(labels{idx}, '^E(\d+)$', 'tokens', 'once');
+    if ~isempty(token)
+        e_numbers(idx) = str2double(token{1});
+    end
+end
+
+e_rows = find(~isnan(e_numbers));
+if ~isempty(e_rows)
+    [sorted_numbers, order] = sort(e_numbers(e_rows));
+    if numel(unique(sorted_numbers)) ~= numel(sorted_numbers)
+        error('Channel-location template contains duplicate E-channel labels.');
+    end
+    expected_numbers = 1:numel(sorted_numbers);
+    if ~isequal(sorted_numbers, expected_numbers)
+        error(['Channel-location template E-channel labels must be contiguous from E1 to E%d. ' ...
+               'Found: %s'], numel(sorted_numbers), mat2str(sorted_numbers));
+    end
+
+    data_rows = e_rows(order);
+    data_chanlocs = raw_chanlocs(data_rows);
+else
+    non_data_mask = false(1, numel(raw_chanlocs));
+    for idx = 1:numel(labels)
+        upper_label = upper(labels{idx});
+        non_data_mask(idx) = startsWith(upper_label, 'FID') || ...
+            any(strcmp(upper_label, {'CZ', 'NZ', 'LPA', 'RPA'}));
+    end
+    data_rows = find(~non_data_mask);
+    data_chanlocs = raw_chanlocs(data_rows);
+    if isempty(data_chanlocs)
+        error('Channel-location template does not contain identifiable EEG data channels.');
+    end
+end
+
+index_info = struct( ...
+    'data_rows', data_rows, ...
+    'excluded_rows', setdiff(1:numel(raw_chanlocs), data_rows, 'stable'));
+end
+
+function EEG = restore_chanloc_metadata(EEG, all_chanlocs, original_channel_indices, initial_channels)
+if numel(original_channel_indices) ~= EEG.nbchan
+    error(['Channel metadata rebuild failed: tracked surviving channels (%d) ' ...
+           'do not match EEG.nbchan (%d).'], numel(original_channel_indices), EEG.nbchan);
+end
+if initial_channels > numel(all_chanlocs)
+    error(['Channel metadata rebuild failed: template has %d channels but ' ...
+           'initial montage expects %d.'], numel(all_chanlocs), initial_channels);
+end
+
+EEG.chanlocs = all_chanlocs(original_channel_indices);
+EEG.urchanlocs = all_chanlocs(1:initial_channels);
+
+removed_channel_indices = setdiff(1:initial_channels, original_channel_indices, 'stable');
+if ~isfield(EEG, 'chaninfo') || ~isstruct(EEG.chaninfo) || isempty(EEG.chaninfo)
+    EEG.chaninfo = struct();
+end
+if isempty(removed_channel_indices)
+    EEG.chaninfo.removedchans = [];
+else
+    EEG.chaninfo.removedchans = all_chanlocs(removed_channel_indices);
+end
+end
+
+function assert_chanloc_metadata(EEG, context_label)
+if nargin < 2 || isempty(context_label)
+    context_label = 'channel metadata validation';
+end
+
+if isempty(EEG.chanlocs)
+    error('%s failed: EEG.chanlocs is empty.', context_label);
+end
+if numel(EEG.chanlocs) ~= EEG.nbchan
+    error(['%s failed: EEG.chanlocs count (%d) does not match EEG.nbchan (%d).'], ...
+          context_label, numel(EEG.chanlocs), EEG.nbchan);
+end
+
+missing_xyz = false(1, EEG.nbchan);
+missing_labels = false(1, EEG.nbchan);
+for ch = 1:EEG.nbchan
+    missing_labels(ch) = ~isfield(EEG.chanlocs, 'labels') || isempty(EEG.chanlocs(ch).labels);
+    missing_xyz(ch) = ~isfield(EEG.chanlocs, 'X') || isempty(EEG.chanlocs(ch).X) || ...
+        ~isfield(EEG.chanlocs, 'Y') || isempty(EEG.chanlocs(ch).Y) || ...
+        ~isfield(EEG.chanlocs, 'Z') || isempty(EEG.chanlocs(ch).Z);
+end
+
+if any(missing_labels)
+    error('%s failed: missing channel labels at indices %s.', ...
+          context_label, mat2str(find(missing_labels)));
+end
+if any(missing_xyz)
+    error('%s failed: missing X/Y/Z coordinates at channel indices %s.', ...
+          context_label, mat2str(find(missing_xyz)));
+end
+end
+
+function assert_iclabel_ready(EEG)
+assert_chanloc_metadata(EEG, 'ICLabel readiness check');
+
+if isempty(EEG.icaweights) || isempty(EEG.icasphere) || isempty(EEG.icawinv)
+    error(['ICLabel readiness check failed: ICA decomposition is incomplete ' ...
+           '(icaweights/icasphere/icawinv missing).']);
+end
+if isempty(EEG.icachansind)
+    error('ICLabel readiness check failed: EEG.icachansind is empty.');
+end
+
+expected_icachansind = 1:EEG.nbchan;
+if ~isequal(EEG.icachansind, expected_icachansind)
+    error(['ICLabel readiness check failed: EEG.icachansind must equal 1:EEG.nbchan ' ...
+           'for this pipeline. Got %s for nbchan=%d.'], mat2str(EEG.icachansind), EEG.nbchan);
+end
+
+ica_chanlocs = EEG.chanlocs(EEG.icachansind);
+missing_ica_xyz = false(1, numel(ica_chanlocs));
+for ch = 1:numel(ica_chanlocs)
+    missing_ica_xyz(ch) = isempty(ica_chanlocs(ch).X) || isempty(ica_chanlocs(ch).Y) || isempty(ica_chanlocs(ch).Z);
+end
+if any(missing_ica_xyz)
+    error(['ICLabel readiness check failed: retained ICA channels are missing X/Y/Z ' ...
+           'coordinates at indices %s.'], mat2str(find(missing_ica_xyz)));
+end
 end
 
 function out = parse_optional_subject_filter(value)
