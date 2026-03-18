@@ -345,8 +345,10 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Start time: %s\n\n', datestr(now));
 
     tic;
-    EEG = pop_runica(EEG, 'icatype', 'runica', 'extended', 1, ...
-        'interrupt', 'off', 'pca', EEG.nbchan);
+    % Silence runica's step-by-step stdout logging to avoid SLURM/MATLAB
+    % batch-stream failures during long ICA runs on Fir.
+    EEG = pop_runica(EEG, 'icatype', 'runica', 'options', ...
+        {'extended', 1, 'interrupt', 'off', 'pca', EEG.nbchan, 'verbose', 'off'});
     amica_time = toc;
 
     fprintf('  ICA decomposition complete!\n');

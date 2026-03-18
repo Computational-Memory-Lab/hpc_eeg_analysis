@@ -49,9 +49,15 @@ fi
 module load matlab/2023b
 module load StdEnv/2023
 
-matlab -batch "\
+matlab -nodisplay -nosplash -r "\
+try; \
 restoredefaultpath; \
 addpath('/home/devon7y/scratch/devon7y/eeglab2025.0.0'); \
 eeglab nogui; \
 addpath('/home/devon7y/scratch/devon7y/hpc_eeg_analysis'); \
-${MATLAB_CALL}"
+${MATLAB_CALL}; \
+catch ME; \
+fprintf(2, '%s\n', getReport(ME, 'extended', 'hyperlinks', 'off')); \
+exit(1); \
+end; \
+exit(0);"
