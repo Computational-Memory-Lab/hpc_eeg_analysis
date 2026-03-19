@@ -421,8 +421,16 @@ for file_idx = 1:length(files_to_process)
     fprintf('  Method: Temporal burst artifact correction\n');
     fprintf('  Cutoff threshold: 20 SD (conservative)\n');
 
+    [asr_maxmem_mb, slurm_mem_limit_mb, slurm_mem_limit_raw] = resolve_asr_maxmem_mb();
+    fprintf('  SLURM memory limit: %d MB', slurm_mem_limit_mb);
+    if ~isempty(slurm_mem_limit_raw)
+        fprintf(' (SLURM_MEM_PER_NODE=%s)', slurm_mem_limit_raw);
+    end
+    fprintf('\n');
+    fprintf('  ASR maxmem cap: %d MB\n', asr_maxmem_mb);
+
     original_data_rms = sqrt(mean(EEG.data(:).^2));
-    EEG = clean_asr(EEG, 20, [], [], [], 0.075, [-inf 5.5]);
+    EEG = clean_asr(EEG, 20, [], [], [], 0.075, [-inf 5.5], [], false, false, asr_maxmem_mb);
     corrected_data_rms = sqrt(mean(EEG.data(:).^2));
     percent_changed = 100 * abs(original_data_rms - corrected_data_rms) / original_data_rms;
 
@@ -597,6 +605,59 @@ end
 index_info = struct( ...
     'data_rows', data_rows, ...
     'excluded_rows', setdiff(1:numel(raw_chanlocs), data_rows, 'stable'));
+end
+
+function [asr_maxmem_mb, slurm_mem_limit_mb, slurm_mem_limit_raw] = resolve_asr_maxmem_mb()
+default_slurm_mem_mb = 192 * 1024;
+slurm_mem_limit_raw = strtrim(getenv('SLURM_MEM_PER_NODE'));
+slurm_mem_limit_mb = parse_memory_limit_mb(slurm_mem_limit_raw);
+if isempty(slurm_mem_limit_mb)
+    slurm_mem_limit_mb = default_slurm_mem_mb;
+end
+
+% Keep substantial headroom for MATLAB, EEGLAB, ICA products, and ASR
+% intermediates. clean_asr/asr_process otherwise reads node-wide free
+% memory and can exceed the SLURM cgroup limit on Fir.
+asr_maxmem_mb = floor(slurm_mem_limit_mb * 0.5);
+asr_maxmem_mb = min(asr_maxmem_mb, slurm_mem_limit_mb - 2048);
+asr_maxmem_mb = max(asr_maxmem_mb, 8192);
+end
+
+function mb = parse_memory_limit_mb(raw_value)
+mb = [];
+if isempty(raw_value)
+    return;
+end
+
+token = regexp(raw_value, '^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?)B?\s*$', 'tokens', 'once');
+if isempty(token)
+    return;
+end
+
+value = str2double(token{1});
+unit = upper(token{2});
+if ~isfinite(value) || value <= 0
+    return;
+end
+
+switch unit
+    case ''
+        multiplier = 1;
+    case 'K'
+        multiplier = 1 / 1024;
+    case 'M'
+        multiplier = 1;
+    case 'G'
+        multiplier = 1024;
+    case 'T'
+        multiplier = 1024 * 1024;
+    case 'P'
+        multiplier = 1024 * 1024 * 1024;
+    otherwise
+        return;
+end
+
+mb = floor(value * multiplier);
 end
 
 function EEG = restore_chanloc_metadata(EEG, all_chanlocs, original_channel_indices, initial_channels)

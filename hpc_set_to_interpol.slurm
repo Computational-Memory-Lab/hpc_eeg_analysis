@@ -8,7 +8,7 @@
 #SBATCH --time=30:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=128G
+#SBATCH --mem=192G
 
 # ============================================================
 # INPUT: folder containing behavioral .set files to preprocess
