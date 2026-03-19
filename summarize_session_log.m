@@ -124,9 +124,9 @@ fprintf('CR rate: %.2f%%\n', item_stats.cr_rate_pct);
 fprintf('d'' = %.3f, c = %.3f\n\n', item_stats.d_prime, item_stats.criterion_c);
 
 fprintf('Assoc:\n');
-fprintf('Accuracy = %.2f%%\n', assoc_stats.accuracy_pct);
-fprintf('Average RT = %.2f ms\n', assoc_stats.avg_rt_ms);
 fprintf('Average time per list (n=%d): %s\n', n_assoc_lists, format_minutes_seconds(avg_assoc_list_ms));
+fprintf('Average RT = %.2f ms\n', assoc_stats.avg_rt_ms);
+fprintf('Accuracy = %.2f%%\n', assoc_stats.accuracy_pct);
 fprintf('Hit rate: %.2f%%\n', assoc_stats.hit_rate_pct);
 fprintf('Miss rate: %.2f%%\n', assoc_stats.miss_rate_pct);
 fprintf('FA rate: %.2f%%\n', assoc_stats.fa_rate_pct);
